@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block head %}<script src="/static/chart.umd.min.js"></script>{% endblock %}
+{% block content %}
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">ダッシュボード</h1>
+  <span class="spacer"></span>
+  <span id="sched" class="small muted"></span>
+  <button id="capture">今すぐ撮影</button>
+</div>
+<div id="cards" class="grid"></div>
+
+<div class="card">
+  <div class="row" style="margin-bottom:12px">
+    <h2 style="margin:0">推移</h2>
+    <span class="spacer"></span>
+    <div id="ranges">
+      <button class="seg" data-h="1">1時間</button><button class="seg on" data-h="24">24時間</button><button class="seg" data-h="168">7日</button><button class="seg" data-h="720">30日</button><button class="seg" data-h="0">期間指定</button>
+    </div>
+  </div>
+  <div id="custom" class="row" style="display:none;margin-bottom:12px">
+    <input type="datetime-local" id="from"> 〜 <input type="datetime-local" id="to"> <button id="apply">表示</button>
+  </div>
+  <div id="camsel" class="row small" style="margin-bottom:8px"></div>
+  <h2 class="disp-temp" style="font-size:14px">温度 (℃)</h2>
+  <div class="chart-box"><canvas id="ct"></canvas></div>
+  <h2 class="disp-hum" style="font-size:14px;margin-top:16px">湿度 (%)</h2>
+  <div class="chart-box"><canvas id="ch"></canvas></div>
+  <div id="bucketinfo" class="small muted" style="margin-top:6px"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let rangeH = 24, cameras = [], hidden = new Set(), charts = {}, interval = 60;
+
+function card(c) {
+  const cam = c.camera, g = c.last_good, last = c.last;
+  const fresh = g && (Date.now() / 1000 - g.ts) < interval * 5;
+  const msgs = [];
+  if (!cam.enabled) msgs.push(["", "記録停止中（無効）"]);
+  if (!cam.calibrated) msgs.push(["", `未校正です。<a href="/calibrate/${cam.id}">校正する</a>`]);
+  if (c.needs_recalibration) msgs.push(["bad", `カメラ位置がずれている可能性があります。<a href="/calibrate/${cam.id}">再校正</a>`]);
+  if (last && !["ok", "manual"].includes(last.status) && c.messages.length) msgs.push([last.status === "low_conf" ? "" : "bad", esc(c.messages.join(" / "))]);
+  return `<div class="card">
+    <div class="row"><strong>${esc(cam.name)}</strong><span class="spacer"></span>${last ? badge(last.status) : ""}</div>
+    <div class="reading" style="opacity:${fresh ? 1 : .45}">
+      <div><span class="v t">${fmtNum(g && g.temperature)}</span><span class="u">℃</span></div>
+      <div><span class="v h">${fmtNum(g && g.humidity, 0)}</span><span class="u">%</span></div>
+    </div>
+    <div class="small muted">最終取得: ${g ? fmtTime(g.ts) : "--"}${last && (!g || last.ts !== g.ts) ? ` / 最終試行: ${fmtTime(last.ts)}` : ""}</div>
+    <div class="strip" title="直近30回の結果">${c.recent.slice().reverse().map(s => `<span class="${s}"></span>`).join("")}</div>
+    ${msgs.map(([cls, m]) => `<div class="alert ${cls}">${m}</div>`).join("")}
+  </div>`;
+}
+
+async function loadStatus() {
+  const s = await api("GET", "/api/status");
+  interval = s.interval;
+  cameras = s.cameras.map(c => c.camera);
+  document.getElementById("cards").innerHTML = s.cameras.length ? s.cameras.map(card).join("") :
+    `<div class="card">カメラが登録されていません。<a href="/cameras">カメラを追加</a></div>`;
+  document.getElementById("sched").textContent = s.scheduler_alive ? `記録中（${s.interval}秒間隔）` : "記録スケジューラ停止中";
+  document.getElementById("camsel").innerHTML = cameras.length > 1 ? cameras.map((c, i) =>
+    `<label class="inline"><input type="checkbox" data-id="${c.id}" ${hidden.has(c.id) ? "" : "checked"}> ${esc(c.name)}</label>`).join("") : "";
+  document.querySelectorAll("#camsel input").forEach(cb => cb.onchange = () => {
+    cb.checked ? hidden.delete(+cb.dataset.id) : hidden.add(+cb.dataset.id); loadSeries();
+  });
+}
+
+function makeChart(el, label) {
+  const grid = cssVar("--border"), text = cssVar("--muted");
+  return new Chart(el, {
+    type: "line", data: { datasets: [] },
+    options: {
+      animation: false, maintainAspectRatio: false, parsing: false, normalized: true,
+      interaction: { mode: "nearest", axis: "x", intersect: false },
+      elements: { point: { radius: 0, hitRadius: 6, hoverRadius: 4 }, line: { borderWidth: 2, tension: 0.15 } },
+      scales: {
+        x: { type: "linear", grid: { color: grid }, ticks: { color: text, maxTicksLimit: 8,
+          callback: v => { const d = new Date(v); return rangeH && rangeH <= 24 ? d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" }) + " " + d.getHours() + "時"; } } },
+        y: { grid: { color: grid }, ticks: { color: text } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { title: items => items.length ? fmtTime(items[0].parsed.x / 1000) : "",
+          label: it => `${it.dataset.label}: ${it.parsed.y.toFixed(1)}${label}` } },
+      },
+    },
+  });
+}
+
+function toPoints(rows, key, gap) {
+  const pts = [];
+  let prev = null;
+  for (const r of rows) {
+    if (r[key] === null) continue;
+    if (prev !== null && r.ts - prev > gap) pts.push({ x: (prev + 1) * 1000, y: null });
+    pts.push({ x: r.ts * 1000, y: r[key] });
+    prev = r.ts;
+  }
+  return pts;
+}
+
+async function loadSeries() {
+  let start, end;
+  if (rangeH) { end = Math.floor(Date.now() / 1000); start = end - rangeH * 3600; }
+  else { start = fromLocalInput(document.getElementById("from").value); end = fromLocalInput(document.getElementById("to").value); }
+  const ids = cameras.filter(c => !hidden.has(c.id)).map(c => c.id);
+  if (!ids.length) { charts.t.data.datasets = []; charts.h.data.datasets = []; charts.t.update(); charts.h.update(); return; }
+  const s = await api("GET", `/api/series?camera_ids=${ids.join(",")}&start=${start || ""}&end=${end || ""}`);
+  const gap = Math.max(s.bucket, interval) * 3;
+  const multi = ids.length > 1;
+  for (const [key, chart, ci] of [["temperature", charts.t, 0], ["humidity", charts.h, 1]]) {
+    chart.data.datasets = ids.map((id, i) => {
+      const color = multi ? CAM_COLORS[i % CAM_COLORS.length][ci] : cssVar(ci ? "--hum" : "--temp");
+      const cam = cameras.find(c => c.id === id);
+      return { label: cam ? cam.name : id, data: toPoints(s.rows.filter(r => r.camera_id === id), key, gap),
+        borderColor: color, backgroundColor: color, spanGaps: false };
+    });
+    chart.options.scales.x.min = s.start * 1000; chart.options.scales.x.max = s.end * 1000;
+    chart.options.plugins.legend.display = multi;
+    chart.update();
+  }
+  document.getElementById("bucketinfo").textContent = s.bucket ? `${s.bucket / 60}分平均で表示` : "";
+}
+
+document.getElementById("ranges").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  document.querySelectorAll("#ranges button").forEach(x => x.classList.toggle("on", x === b));
+  rangeH = +b.dataset.h;
+  document.getElementById("custom").style.display = rangeH ? "none" : "flex";
+  if (rangeH) loadSeries();
+};
+document.getElementById("apply").onclick = loadSeries;
+document.getElementById("capture").onclick = async e => {
+  e.target.disabled = true; toast("撮影中…");
+  try { await api("POST", "/api/capture-now", {}); toast("撮影しました"); await refresh(); }
+  catch (err) { toast("失敗: " + err.message); }
+  e.target.disabled = false;
+};
+async function refresh() { await loadStatus(); await loadSeries(); }
+
+const now = Math.floor(Date.now() / 1000);
+document.getElementById("from").value = toLocalInput(now - 86400);
+document.getElementById("to").value = toLocalInput(now);
+charts.t = makeChart(document.getElementById("ct"), "℃");
+charts.h = makeChart(document.getElementById("ch"), "%");
+refresh();
+setInterval(refresh, 30000);
+</script>
+{% endblock %}

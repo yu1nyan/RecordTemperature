@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>設定</h1>
+<div class="card">
+  <h2>記録</h2>
+  <div class="form-grid">
+    <label>撮影間隔（秒）※再起動後に反映<input type="number" data-k="interval_sec" min="10"></label>
+    <label>撮影タイムアウト（秒）<input type="number" data-k="capture_timeout_sec" min="3"></label>
+    <label>撮影リトライ回数<input type="number" data-k="capture_retries" min="1" max="5"></label>
+  </div>
+</div>
+<div class="card">
+  <h2>読み取りの妥当性チェック</h2>
+  <div class="form-grid">
+    <label>温度 下限 (℃)<input type="number" data-k="temp_range" data-i="0"></label>
+    <label>温度 上限 (℃)<input type="number" data-k="temp_range" data-i="1"></label>
+    <label>湿度 下限 (%)<input type="number" data-k="hum_range" data-i="0"></label>
+    <label>湿度 上限 (%)<input type="number" data-k="hum_range" data-i="1"></label>
+    <label>温度の急変判定 (℃)<input type="number" step="0.1" data-k="max_temp_jump"></label>
+    <label>湿度の急変判定 (%)<input type="number" step="0.1" data-k="max_hum_jump"></label>
+    <label>最低信頼度 (0〜1)<input type="number" step="0.01" data-k="min_confidence"></label>
+    <label>位置ずれ判定 相関 (0〜1)<input type="number" step="0.05" data-k="min_align_cc"></label>
+  </div>
+</div>
+<div class="card">
+  <h2>画像の保存</h2>
+  <div class="form-grid">
+    <label class="inline"><input type="checkbox" data-k="save_ok_images"> 正常な読み取りの画像も保存する（容量注意）</label>
+    <label>正常画像の保存日数<input type="number" data-k="keep_ok_images_days" min="1"></label>
+    <label>失敗画像の保存日数<input type="number" data-k="keep_bad_images_days" min="1"></label>
+  </div>
+</div>
+<div class="card">
+  <h2>Web 画面</h2>
+  <div class="form-grid">
+    <label>待ち受けアドレス ※再起動後に反映<select data-k="host"><option value="127.0.0.1">127.0.0.1（このPCのみ）</option><option value="0.0.0.0">0.0.0.0（LAN内の他端末からも閲覧）</option></select></label>
+    <label>ポート ※再起動後に反映<input type="number" data-k="port"></label>
+  </div>
+</div>
+<button class="primary" id="save">保存</button>
+{% endblock %}
+{% block scripts %}
+<script>
+let cfg = {};
+async function load() {
+  cfg = await api("GET", "/api/settings");
+  document.querySelectorAll("[data-k]").forEach(el => {
+    const v = cfg[el.dataset.k];
+    if (el.type === "checkbox") el.checked = !!v;
+    else el.value = el.dataset.i !== undefined ? v[+el.dataset.i] : v;
+  });
+}
+document.getElementById("save").onclick = async () => {
+  const out = {};
+  document.querySelectorAll("[data-k]").forEach(el => {
+    const k = el.dataset.k;
+    if (el.type === "checkbox") out[k] = el.checked;
+    else if (el.dataset.i !== undefined) { out[k] = out[k] || cfg[k].slice(); out[k][+el.dataset.i] = +el.value; }
+    else out[k] = el.tagName === "SELECT" ? el.value : +el.value;
+  });
+  try { await api("PUT", "/api/settings", out); toast("保存しました"); load(); }
+  catch (e) { toast("エラー: " + e.message); }
+};
+load();
+</script>
+{% endblock %}

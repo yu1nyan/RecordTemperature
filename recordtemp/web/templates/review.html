@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>読取確認</h1>
+<p class="muted">読み取りに失敗した・信頼度が低かった記録です（直近30日）。画像を見て正しい値を入力すると記録が修正され、その画像は校正用サンプルとして保存されます。サンプルが溜まったら校正画面の「全サンプルで再調整」で精度を改善できます。</p>
+<div class="row" style="margin-bottom:12px">
+  <label>カメラ<select id="cam"><option value="">すべて</option></select></label>
+  <span id="count" class="muted small"></span>
+</div>
+<div id="list" class="grid"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+let names = {};
+async function load() {
+  const cam = document.getElementById("cam").value;
+  const d = await api("GET", `/api/review?camera_ids=${cam}&limit=60`);
+  document.getElementById("count").textContent = `${d.total} 件`;
+  document.getElementById("list").innerHTML = d.rows.map(r => `<div class="card" id="r${r.id}">
+    <div class="row"><strong>${esc(names[r.camera_id] || r.camera_id)}</strong><span class="small muted">${fmtTime(r.ts)}</span><span class="spacer"></span>${badge(r.status)}</div>
+    <a href="${r.image_url}" target="_blank"><img class="thumb" src="${r.image_url}" loading="lazy" style="margin:8px 0"></a>
+    <div class="small muted">読取: ${esc(r.raw_text || "-")}</div>
+    <div class="small muted" style="margin-bottom:8px">${esc(r.message || "")}</div>
+    <div class="row">
+      <label>温度 (℃)<input type="number" step="0.1" id="t${r.id}" value="${r.temperature ?? ""}"></label>
+      <label>湿度 (%)<input type="number" step="0.1" id="h${r.id}" value="${r.humidity ?? ""}"></label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" data-save="${r.id}">この値で修正</button>
+      <button data-dismiss="${r.id}" title="判読できない画像などを一覧から外します">除外</button>
+      <a class="btn" href="/calibrate/${r.camera_id}">校正へ</a>
+    </div></div>`).join("") || '<div class="card muted">確認が必要な記録はありません。</div>';
+  document.querySelectorAll("[data-save]").forEach(b => b.onclick = async () => {
+    const id = b.dataset.save;
+    const t = document.getElementById("t" + id).value, h = document.getElementById("h" + id).value;
+    if (t === "" && h === "") return toast("値を入力してください");
+    await api("POST", `/api/readings/${id}/correct`, { temperature: t, humidity: h, add_sample: true });
+    document.getElementById("r" + id).remove(); toast("修正しました（サンプルに追加）");
+  });
+  document.querySelectorAll("[data-dismiss]").forEach(b => b.onclick = async () => {
+    await api("POST", `/api/readings/${b.dataset.dismiss}/dismiss`);
+    document.getElementById("r" + b.dataset.dismiss).remove();
+  });
+}
+(async () => {
+  const cams = await api("GET", "/api/cameras");
+  cams.forEach(c => { names[c.id] = c.name; document.getElementById("cam").insertAdjacentHTML("beforeend", `<option value="${c.id}">${esc(c.name)}</option>`); });
+  document.getElementById("cam").onchange = load;
+  load();
+})();
+</script>
+{% endblock %}

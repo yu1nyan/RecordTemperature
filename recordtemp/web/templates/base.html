@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}温湿度記録{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/common.js"></script>
+{% block head %}{% endblock %}
+</head>
+<body>
+<header><div class="inner">
+  <div class="brand">温湿度記録</div>
+  <nav>
+    <a href="/" class="{{ 'active' if page=='dashboard' }}">ダッシュボード</a>
+    <a href="/table" class="{{ 'active' if page=='table' }}">記録一覧</a>
+    <a href="/review" class="{{ 'active' if page=='review' }}">読取確認</a>
+    <a href="/cameras" class="{{ 'active' if page=='cameras' }}">カメラ・校正</a>
+    <a href="/settings" class="{{ 'active' if page=='settings' }}">設定</a>
+  </nav>
+</div></header>
+<main>{% block content %}{% endblock %}</main>
+<div id="toast" class="toast"></div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

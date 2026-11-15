@@ -1,0 +1,346 @@
+{% extends "base.html" %}
+{% block title %}校正 - {{ cam.name }}{% endblock %}
+{% block content %}
+<div class="row" style="margin-bottom:12px">
+  <h1 style="margin:0">校正: {{ cam.name }}</h1><span class="spacer"></span>
+  <a class="btn" href="/cameras">← カメラ一覧</a>
+</div>
+<div class="steps">
+  <div class="card">
+    <h2>画像を取得</h2>
+    <div class="row">
+      <button class="primary" id="snap">カメラで撮影</button>
+      <button id="useref" style="display:none">現在の基準画像を使う</button>
+      <span id="snapinfo" class="small muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>表示領域を指定</h2>
+    <p class="small muted" style="margin-top:0">温度・湿度それぞれについて、<b>数字部分だけ</b>（℃や%の記号は含めない）を囲むように四隅をクリックします（順番は自由）。点はドラッグで微調整できます。もう一度クリックすると指定し直しになります。</p>
+    <div class="row" style="margin-bottom:10px">
+      <div id="dispsel"><button class="seg on" data-k="temperature">温度</button><button class="seg" data-k="humidity">湿度</button></div>
+      <label class="inline">拡大 <input type="range" id="zoom" min="1" max="4" step="0.5" value="1"></label>
+      <span class="spacer"></span>
+      <span id="cornerinfo" class="small muted"></span>
+    </div>
+    <div class="canvas-wrap" id="wrap" style="max-height:70vh"><canvas id="cv"></canvas></div>
+    <div class="form-grid" style="margin-top:12px">
+      <label><span class="disp-temp">温度</span> 桁数（マイナス用の桁を含む）<input type="number" id="t_n" min="1" max="6" value="3"></label>
+      <label><span class="disp-temp">温度</span> 小数点以下の桁数<input type="number" id="t_d" min="0" max="3" value="1"></label>
+      <label><span class="disp-hum">湿度</span> 桁数<input type="number" id="h_n" min="1" max="6" value="2"></label>
+      <label><span class="disp-hum">湿度</span> 小数点以下の桁数<input type="number" id="h_d" min="0" max="3" value="0"></label>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="auto">自動認識</button></div>
+  </div>
+
+  <div class="card">
+    <h2>認識結果を確認</h2>
+    <p class="small muted" style="margin-top:0">水色の枠が各桁、緑が点灯・赤が消灯と判定したセグメントです。枠がずれていれば、ドラッグで移動・端をドラッグでサイズ変更できます。</p>
+    <div id="results" class="muted">表示領域を指定して「自動認識」を押してください。</div>
+  </div>
+
+  <div class="card">
+    <h2>実際の表示値を入力して自動調整</h2>
+    <p class="small muted" style="margin-top:0">温湿度計に表示されている値を入力すると、その値に一致するよう二値化閾値・セグメント幅・傾き等を自動で探索します。保存済みのサンプル（読取確認画面で修正した画像を含む）も併せて使用します。</p>
+    <div class="row">
+      <label><span class="disp-temp">温度 (℃)</span><input type="number" step="0.1" id="truth_t"></label>
+      <label><span class="disp-hum">湿度 (%)</span><input type="number" step="0.1" id="truth_h"></label>
+      <label>&nbsp;<button class="primary" id="fit">正解値に合わせて自動調整</button></label>
+    </div>
+    <div id="fitinfo" class="small" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <h2>保存</h2>
+    <p class="small muted" style="margin-top:0">この画像が基準画像となり、以降はカメラの小さなずれを自動補正します。入力した正解値はサンプルとして保存されます。</p>
+    <button class="primary" id="save">校正を保存</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="row"><h2 style="margin:0">サンプル（正解値つき画像）</h2><span class="spacer"></span>
+    <button id="refit">全サンプルで再調整して保存</button></div>
+  <div id="samples" class="grid" style="margin-top:12px"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const CAM = {{ cam.id }};
+const COLORS = { temperature: cssVar("--temp"), humidity: cssVar("--hum") };
+let snapshot = null, img = null, active = "temperature", zoom = 1, refImage = null;
+let disp = { temperature: { corners: [] }, humidity: { corners: [] } };
+let results = {};
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+
+function syncForm(toDisp) {
+  const map = { temperature: ["t_n", "t_d"], humidity: ["h_n", "h_d"] };
+  for (const k in map) {
+    const [n, d] = map[k].map(id => document.getElementById(id));
+    if (toDisp) {
+      const nn = +n.value, dd = +d.value;
+      if (disp[k].n_digits !== nn) { disp[k].boxes = null; disp[k].boxes_manual = false; }
+      disp[k].n_digits = nn; disp[k].decimals = dd;
+    } else {
+      n.value = disp[k].n_digits ?? (k === "temperature" ? 3 : 2);
+      d.value = disp[k].decimals ?? (k === "temperature" ? 1 : 0);
+    }
+  }
+}
+
+// ------------------------------------------------------------ image canvas
+function baseScale() { return img ? Math.min(1, (document.getElementById("wrap").clientWidth - 2) / img.width) : 1; }
+function scale() { return baseScale() * zoom; }
+function draw() {
+  if (!img) return;
+  const s = scale();
+  cv.width = Math.round(img.width * s); cv.height = Math.round(img.height * s);
+  ctx.drawImage(img, 0, 0, cv.width, cv.height);
+  for (const k of ["temperature", "humidity"]) {
+    const c = disp[k].corners || [];
+    ctx.strokeStyle = COLORS[k]; ctx.fillStyle = COLORS[k]; ctx.lineWidth = k === active ? 2.5 : 1.5;
+    if (c.length > 1) {
+      ctx.beginPath(); c.forEach((p, i) => i ? ctx.lineTo(p[0] * s, p[1] * s) : ctx.moveTo(p[0] * s, p[1] * s));
+      if (c.length === 4) ctx.closePath();
+      ctx.stroke();
+    }
+    c.forEach(p => { ctx.beginPath(); ctx.arc(p[0] * s, p[1] * s, k === active ? 5 : 3, 0, 7); ctx.fill(); });
+    if (c.length) {
+      ctx.font = "bold 14px sans-serif";
+      ctx.fillText(k === "temperature" ? "温度" : "湿度", c[0][0] * s, c[0][1] * s - 8);
+    }
+  }
+  const n = (disp[active].corners || []).length;
+  document.getElementById("cornerinfo").textContent =
+    `${active === "temperature" ? "温度" : "湿度"}: ${n}/4 点` + (n < 4 ? "（クリックして指定）" : "");
+}
+let dragPt = null, moved = false;
+function evPos(e) { const r = cv.getBoundingClientRect(), s = scale(); return [(e.clientX - r.left) / s, (e.clientY - r.top) / s]; }
+cv.addEventListener("mousedown", e => {
+  if (!img) return;
+  const [x, y] = evPos(e), s = scale();
+  const c = disp[active].corners;
+  dragPt = null; moved = false;
+  c.forEach((p, i) => { if (Math.hypot(p[0] - x, p[1] - y) * s < 10) dragPt = i; });
+});
+cv.addEventListener("mousemove", e => {
+  if (dragPt === null) return;
+  moved = true;
+  disp[active].corners[dragPt] = evPos(e).map(v => Math.round(v * 10) / 10);
+  draw();
+});
+window.addEventListener("mouseup", e => {
+  if (!img) return;
+  if (dragPt !== null) { if (moved) invalidate(active); dragPt = null; return; }
+  if (e.target !== cv) return;
+  const c = disp[active].corners;
+  if (c.length >= 4) disp[active].corners = [];
+  disp[active].corners.push(evPos(e).map(v => Math.round(v * 10) / 10));
+  invalidate(active);
+  if (disp[active].corners.length === 4 && active === "temperature" && (disp.humidity.corners || []).length < 4) {
+    setActive("humidity");
+  }
+  draw();
+});
+function invalidate(k) { Object.assign(disp[k], { boxes: null, boxes_manual: false, shear: null }); }
+function setActive(k) {
+  active = k;
+  document.querySelectorAll("#dispsel button").forEach(b => b.classList.toggle("on", b.dataset.k === k));
+  draw();
+}
+document.getElementById("dispsel").onclick = e => { const b = e.target.closest("button"); if (b) setActive(b.dataset.k); };
+document.getElementById("zoom").oninput = e => { zoom = +e.target.value; draw(); };
+window.addEventListener("resize", draw);
+
+function loadImage(url) {
+  return new Promise((ok, ng) => { const i = new Image(); i.onload = () => ok(i); i.onerror = ng; i.src = url + "?t=" + Date.now(); });
+}
+async function setSnapshot(s) {
+  snapshot = s.snapshot; img = await loadImage(s.url);
+  document.getElementById("snapinfo").textContent = `${s.width || img.width}×${s.height || img.height}  ${s.snapshot}`;
+  draw();
+}
+
+// ------------------------------------------------------------ results
+function readyDisplays() {
+  syncForm(true);
+  const out = {};
+  for (const k in disp) if ((disp[k].corners || []).length === 4) out[k] = disp[k];
+  return out;
+}
+function renderResults(res, extra = {}) {
+  for (const k in res) { results[k] = res[k]; disp[k] = Object.assign({}, res[k].params); }
+  const el = document.getElementById("results");
+  el.classList.remove("muted");
+  el.innerHTML = ["temperature", "humidity"].filter(k => results[k]).map(k => {
+    const r = results[k], p = r.params;
+    const ok = r.value !== null;
+    return `<div style="margin-bottom:20px">
+      <div class="row"><span class="${k === "temperature" ? "disp-temp" : "disp-hum"}">${k === "temperature" ? "温度" : "湿度"}</span>
+        <span>読取: <b style="font-size:20px">${ok ? r.value : "読取不可"}</b> <span class="muted">('${esc(r.text)}')</span></span>
+        <span class="small muted">信頼度 ${r.confidence.toFixed(2)}</span>
+        ${extra[k] ? `<span class="small">一致 ${extra[k].matches}/${extra[k].total}</span>` : ""}</div>
+      <div class="row" style="align-items:flex-start;margin-top:6px">
+        <div><div class="small muted">補正後</div><img src="${r.warped}" style="border-radius:4px"></div>
+        <div><div class="small muted">二値化・判定（ドラッグで枠を調整）</div><canvas data-k="${k}" class="boxcv" style="border-radius:4px;cursor:move"></canvas></div>
+      </div>
+      <details style="margin-top:6px"><summary class="small muted">詳細パラメータ</summary>
+        <div class="row" style="margin-top:6px">
+          <label>極性<select data-p="polarity" data-k="${k}">
+            <option value="dark" ${p.polarity === "dark" ? "selected" : ""}>暗い数字（液晶）</option>
+            <option value="light" ${p.polarity === "light" ? "selected" : ""}>明るい数字（LED）</option></select></label>
+          <label>傾き補正<input type="number" step="0.01" data-p="shear" data-k="${k}" value="${p.shear}"></label>
+          <label>閾値オフセット<input type="number" step="1" data-p="thresh_offset" data-k="${k}" value="${p.thresh_offset}"></label>
+          <label>セグメント幅<input type="number" step="0.01" data-p="seg_width" data-k="${k}" value="${p.seg_width}"></label>
+          <label>点灯判定<input type="number" step="0.05" data-p="fill_thresh" data-k="${k}" value="${p.fill_thresh}"></label>
+          <label>&nbsp;<button data-reset="${k}">桁枠を自動に戻す</button></label>
+        </div></details></div>`;
+  }).join("");
+  el.querySelectorAll("canvas.boxcv").forEach(setupBoxCanvas);
+  el.querySelectorAll("[data-p]").forEach(inp => inp.onchange = () => {
+    const k = inp.dataset.k, v = inp.dataset.p === "polarity" ? inp.value : +inp.value;
+    disp[k][inp.dataset.p] = v;
+    if (inp.dataset.p === "shear" || inp.dataset.p === "polarity") { if (!disp[k].boxes_manual) disp[k].boxes = null; }
+    preview(false, [k]);
+  });
+  el.querySelectorAll("[data-reset]").forEach(b => b.onclick = () => {
+    const k = b.dataset.reset; disp[k].boxes = null; disp[k].boxes_manual = false; preview(false, [k]);
+  });
+}
+
+function setupBoxCanvas(c) {
+  const k = c.dataset.k, r = results[k];
+  const im = new Image();
+  im.onload = () => {
+    c.width = im.width; c.height = im.height;
+    const S = 2;   // debug image scale
+    let drag = null;
+    const boxes = () => disp[k].boxes;
+    const redraw = () => {
+      const g = c.getContext("2d"); g.drawImage(im, 0, 0);
+      if (drag) { const b = boxes()[drag.i]; g.strokeStyle = "#ffeb3b"; g.lineWidth = 2; g.strokeRect(b[0] * S, b[1] * S, (b[2] - b[0]) * S, (b[3] - b[1]) * S); }
+    };
+    redraw();
+    const pos = e => { const rc = c.getBoundingClientRect(); return [(e.clientX - rc.left) * (c.width / rc.width) / S, (e.clientY - rc.top) * (c.height / rc.height) / S]; };
+    c.onmousedown = e => {
+      const [x, y] = pos(e), tol = 4;
+      (boxes() || []).forEach((b, i) => {
+        if (x < b[0] - tol || x > b[2] + tol || y < b[1] - tol || y > b[3] + tol) return;
+        const edges = { l: Math.abs(x - b[0]) < tol, r: Math.abs(x - b[2]) < tol, t: Math.abs(y - b[1]) < tol, b: Math.abs(y - b[3]) < tol };
+        drag = { i, x, y, orig: b.slice(), edges, move: !Object.values(edges).some(Boolean) };
+      });
+      e.preventDefault();
+    };
+    c.onmousemove = e => {
+      const [x, y] = pos(e);
+      if (!drag) {
+        let cur = "default";
+        (boxes() || []).forEach(b => {
+          if (x >= b[0] - 4 && x <= b[2] + 4 && y >= b[1] - 4 && y <= b[3] + 4)
+            cur = Math.abs(x - b[0]) < 4 || Math.abs(x - b[2]) < 4 ? "ew-resize" : Math.abs(y - b[1]) < 4 || Math.abs(y - b[3]) < 4 ? "ns-resize" : "move";
+        });
+        c.style.cursor = cur; return;
+      }
+      const dx = Math.round(x - drag.x), dy = Math.round(y - drag.y), o = drag.orig, b = boxes()[drag.i];
+      if (drag.move) { b[0] = o[0] + dx; b[2] = o[2] + dx; b[1] = o[1] + dy; b[3] = o[3] + dy; }
+      else {
+        if (drag.edges.l) b[0] = Math.min(o[0] + dx, b[2] - 4);
+        if (drag.edges.r) b[2] = Math.max(o[2] + dx, b[0] + 4);
+        if (drag.edges.t) b[1] = Math.min(o[1] + dy, b[3] - 4);
+        if (drag.edges.b) b[3] = Math.max(o[3] + dy, b[1] + 4);
+      }
+      redraw();
+    };
+    c.onmouseup = c.onmouseleave = () => {
+      if (!drag) return;
+      const changed = drag.orig.some((v, j) => v !== boxes()[drag.i][j]);
+      drag = null;
+      if (changed) { disp[k].boxes_manual = true; preview(false, [k]); }
+    };
+  };
+  im.src = r.debug;
+}
+
+async function preview(auto, keys) {
+  if (!snapshot) return toast("先に画像を取得してください");
+  let d = readyDisplays();
+  if (keys) d = Object.fromEntries(Object.entries(d).filter(([k]) => keys.includes(k)));
+  if (!Object.keys(d).length) return toast("表示領域の四隅を指定してください");
+  try {
+    const r = await api("POST", `/api/cameras/${CAM}/calib/preview`, { snapshot, displays: d, auto });
+    renderResults(r.displays);
+  } catch (e) { toast("エラー: " + e.message); }
+}
+document.getElementById("auto").onclick = () => preview(true);
+
+document.getElementById("fit").onclick = async e => {
+  if (!snapshot) return toast("先に画像を取得してください");
+  const truth = { temperature: document.getElementById("truth_t").value, humidity: document.getElementById("truth_h").value };
+  const d = readyDisplays();
+  if (!Object.keys(d).length) return toast("表示領域の四隅を指定してください");
+  e.target.disabled = true; document.getElementById("fitinfo").textContent = "探索中…";
+  try {
+    const r = await api("POST", `/api/cameras/${CAM}/calib/fit`, { snapshot, displays: d, truth, use_samples: true });
+    const stats = {}; for (const k in r.displays) stats[k] = r.displays[k].stats;
+    renderResults(r.displays, stats);
+    const msg = Object.entries(stats).map(([k, s]) => `${k === "temperature" ? "温度" : "湿度"}: ${s.matches}/${s.total} 枚一致`).join("、");
+    document.getElementById("fitinfo").textContent = msg ? `調整完了（${msg}）。結果を確認して保存してください。` : "正解値またはサンプルがありません。";
+  } catch (err) { document.getElementById("fitinfo").textContent = "エラー: " + err.message; }
+  e.target.disabled = false;
+};
+
+document.getElementById("save").onclick = async () => {
+  if (!snapshot) return toast("先に画像を取得してください");
+  const d = readyDisplays();
+  if (!Object.keys(d).length) return toast("表示領域の四隅を指定してください");
+  const truth = { temperature: document.getElementById("truth_t").value, humidity: document.getElementById("truth_h").value };
+  try {
+    await api("POST", `/api/cameras/${CAM}/calib/save`, { snapshot, displays: d, truth });
+    toast("校正を保存しました"); loadSamples();
+  } catch (e) { toast("エラー: " + e.message); }
+};
+
+document.getElementById("snap").onclick = async e => {
+  e.target.disabled = true; toast("撮影中…");
+  try { await setSnapshot(await api("POST", `/api/cameras/${CAM}/calib/snapshot`, {})); toast("撮影しました"); if (Object.keys(readyDisplays()).length) preview(false); }
+  catch (err) { toast("撮影失敗: " + err.message, 6000); }
+  e.target.disabled = false;
+};
+document.getElementById("useref").onclick = async () => {
+  await setSnapshot({ snapshot: refImage, url: "/files/" + refImage }); preview(false);
+};
+document.getElementById("refit").onclick = async e => {
+  if (!confirm("保存済みの全サンプルでパラメータを再探索し、校正を更新します。よろしいですか？")) return;
+  e.target.disabled = true;
+  try {
+    const r = await api("POST", `/api/cameras/${CAM}/calib/refit`);
+    toast("再調整しました: " + Object.entries(r.stats).map(([k, s]) => `${k === "temperature" ? "温度" : "湿度"} ${s.matches}/${s.total}`).join("、"), 6000);
+    await init();
+  } catch (err) { toast("エラー: " + err.message); }
+  e.target.disabled = false;
+};
+
+async function loadSamples() {
+  const r = await api("GET", `/api/cameras/${CAM}/calib`);
+  document.getElementById("samples").innerHTML = r.samples.map(s => `<div>
+    <a href="${s.image_url}" target="_blank"><img class="thumb" src="${s.image_url}" loading="lazy"></a>
+    <div class="row small" style="margin-top:4px"><span>温度 ${fmtNum(s.true_temp)} ℃ / 湿度 ${fmtNum(s.true_hum, 0)} %</span><span class="spacer"></span>
+    <button class="danger" data-sdel="${s.id}">削除</button></div></div>`).join("") || '<span class="muted small">まだありません</span>';
+  document.querySelectorAll("[data-sdel]").forEach(b => b.onclick = async () => { await api("DELETE", `/api/samples/${b.dataset.sdel}`); loadSamples(); });
+  return r;
+}
+
+async function init() {
+  const r = await loadSamples();
+  if (r.calibration) {
+    refImage = r.calibration.reference_image;
+    document.getElementById("useref").style.display = "";
+    disp = Object.assign({ temperature: { corners: [] }, humidity: { corners: [] } }, r.calibration.params.displays);
+    syncForm(false);
+    try { await setSnapshot({ snapshot: refImage, url: r.calibration.reference_url }); await preview(false); }
+    catch (e) { /* reference image missing */ }
+  }
+}
+init();
+</script>
+{% endblock %}
