@@ -25,6 +25,8 @@
   <div class="chart-box"><canvas id="ct"></canvas></div>
   <h2 class="disp-hum" style="font-size:14px;margin-top:16px">湿度 (%)</h2>
   <div class="chart-box"><canvas id="ch"></canvas></div>
+  <h2 class="disp-abs" style="font-size:14px;margin-top:16px">絶対湿度 (g/m³) <span class="small muted" style="font-weight:400">温度と相対湿度から計算。破線 7 g/m³ 未満はインフルエンザ警戒、11 g/m³ 未満は要注意の目安</span></h2>
+  <div class="chart-box"><canvas id="ca"></canvas></div>
   <div id="bucketinfo" class="small muted" style="margin-top:6px"></div>
 </div>
 
@@ -76,9 +78,29 @@ async function loadStatus() {
   });
 }
 
-function makeChart(el, label) {
+// 絶対湿度グラフの目安線（7 / 11 g/m³）
+const absGuides = {
+  id: "absGuides",
+  beforeDatasetsDraw(chart) {
+    const { ctx, chartArea: a, scales: { y } } = chart;
+    ctx.save();
+    ctx.setLineDash([5, 4]); ctx.lineWidth = 1; ctx.font = "11px system-ui, sans-serif";
+    ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+    for (const [v, label] of [[7, "7 g/m³ 警戒"], [11, "11 g/m³ 要注意"]]) {
+      if (v < y.min || v > y.max) continue;
+      const py = y.getPixelForValue(v);
+      ctx.strokeStyle = ctx.fillStyle = cssVar("--muted");
+      ctx.beginPath(); ctx.moveTo(a.left, py); ctx.lineTo(a.right, py); ctx.stroke();
+      ctx.fillText(label, a.right - 4, py - 2);
+    }
+    ctx.restore();
+  },
+};
+
+function makeChart(el, label, plugins = []) {
   const grid = cssVar("--border"), text = cssVar("--muted");
   return new Chart(el, {
+    plugins,
     type: "line", data: { datasets: [] },
     options: {
       animation: false, maintainAspectRatio: false, parsing: false, normalized: true,
@@ -128,10 +150,15 @@ async function loadSeries() {
   const od = s.outdoor;
   renderOutdoorToggle(od);
   const gap = Math.max(s.bucket, interval) * 3;
+  // 絶対湿度は温度・相対湿度から計算（長期間の表示では平均値から計算した近似）
+  const addAbs = r => { r.abs = r.temperature !== null && r.humidity !== null ? absHumidity(r.temperature, r.humidity) : null; };
+  s.rows.forEach(addAbs);
+  if (od) od.rows.forEach(addAbs);
   const multi = ids.length > 1;
-  for (const [key, chart, ci] of [["temperature", charts.t, 0], ["humidity", charts.h, 1]]) {
+  for (const [key, chart, ci, colorVar] of [["temperature", charts.t, 0, "--temp"], ["humidity", charts.h, 1, "--hum"],
+                                             ["abs", charts.a, 1, "--abs"]]) {
     chart.data.datasets = ids.map((id, i) => {
-      const color = multi ? CAM_COLORS[i % CAM_COLORS.length][ci] : cssVar(ci ? "--hum" : "--temp");
+      const color = multi ? CAM_COLORS[i % CAM_COLORS.length][ci] : cssVar(colorVar);
       const cam = cameras.find(c => c.id === id);
       return { label: cam ? cam.name : id, data: toPoints(s.rows.filter(r => r.camera_id === id), key, gap),
         borderColor: color, backgroundColor: color, spanGaps: false };
@@ -174,6 +201,7 @@ document.getElementById("from").value = toLocalInput(now - 86400);
 document.getElementById("to").value = toLocalInput(now);
 charts.t = makeChart(document.getElementById("ct"), "℃");
 charts.h = makeChart(document.getElementById("ch"), "%");
+charts.a = makeChart(document.getElementById("ca"), " g/m³", [absGuides]);
 charts.c = makeComfortChart(document.getElementById("cc"));
 refresh();
 setInterval(refresh, 30000);

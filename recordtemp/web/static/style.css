@@ -1,13 +1,13 @@
 :root {
   --bg: #f5f6f8; --surface: #ffffff; --text: #1d2330; --muted: #6b7280; --border: #e3e6eb;
   --accent: #2f6fdb; --accent-weak: #e8f0fd; --ok: #1f9d55; --warn: #c27c0e; --bad: #d64545;
-  --temp: #e4572e; --hum: #2b7bd6;
+  --temp: #e4572e; --hum: #2b7bd6; --abs: #138a72;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #14171c; --surface: #1d2129; --text: #e6e8ec; --muted: #9aa1ad; --border: #2e333d;
     --accent: #6ea0f5; --accent-weak: #22304a; --ok: #3ccf7f; --warn: #e6a43a; --bad: #ef6b6b;
-    --temp: #ff7b54; --hum: #5aa2f0;
+    --temp: #ff7b54; --hum: #5aa2f0; --abs: #3cc9a6;
   }
 }
 * { box-sizing: border-box; }
@@ -79,6 +79,7 @@ canvas { display: block; }
   border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; align-items: center; justify-content: center; margin-right: 8px; }
 .disp-temp { color: var(--temp); font-weight: 600; }
 .disp-hum { color: var(--hum); font-weight: 600; }
+.disp-abs { color: var(--abs); font-weight: 600; }
 @media (max-width: 600px) {
   header .brand { display: none; }
   .reading .v { font-size: 32px; }
