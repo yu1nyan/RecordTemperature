@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block head %}<script src="/static/chart.umd.min.js"></script>{% endblock %}
+{% block head %}<script src="/static/chart.umd.min.js"></script><script src="/static/comfort.js"></script>{% endblock %}
 {% block content %}
 <div class="row" style="margin-bottom:12px">
   <h1 style="margin:0">ダッシュボード</h1>
@@ -26,6 +26,16 @@
   <h2 class="disp-hum" style="font-size:14px;margin-top:16px">湿度 (%)</h2>
   <div class="chart-box"><canvas id="ch"></canvas></div>
   <div id="bucketinfo" class="small muted" style="margin-top:6px"></div>
+</div>
+
+<div class="card">
+  <h2 style="margin:0 0 4px">快適温湿度チャート</h2>
+  <div class="small muted" style="margin-bottom:8px">上の「推移」と同じ期間の記録を点で表示（古いほど薄く、大きい点が最新）</div>
+  <div class="chart-box comfort-box"><canvas id="cc"></canvas></div>
+  <div class="small muted" style="margin-top:6px">
+    PMV 条件: 気温＝放射温度、気流 0.15m/s、活動量 1.0met（座位）、着衣量 夏 0.5clo（PMV＋側）／冬 1.0clo（PMV−側）。
+    快適域は冬 PMV−0.5〜夏 PMV＋0.5・湿度 40〜70%。カビ（70%以上・20℃以上）・ダニ（60%以上・25℃以上）・インフルエンザ（絶対湿度 7／11g/m³）の範囲は目安です。
+  </div>
 </div>
 {% endblock %}
 {% block scripts %}
@@ -105,7 +115,7 @@ async function loadSeries() {
   if (rangeH) { end = Math.floor(Date.now() / 1000); start = end - rangeH * 3600; }
   else { start = fromLocalInput(document.getElementById("from").value); end = fromLocalInput(document.getElementById("to").value); }
   const ids = cameras.filter(c => !hidden.has(c.id)).map(c => c.id);
-  if (!ids.length) { charts.t.data.datasets = []; charts.h.data.datasets = []; charts.t.update(); charts.h.update(); return; }
+  if (!ids.length) { updateComfortChart(charts.c, []); charts.t.data.datasets = []; charts.h.data.datasets = []; charts.t.update(); charts.h.update(); return; }
   const s = await api("GET", `/api/series?camera_ids=${ids.join(",")}&start=${start || ""}&end=${end || ""}`);
   const gap = Math.max(s.bucket, interval) * 3;
   const multi = ids.length > 1;
@@ -121,6 +131,11 @@ async function loadSeries() {
     chart.update();
   }
   document.getElementById("bucketinfo").textContent = s.bucket ? `${s.bucket / 60}分平均で表示` : "";
+  updateComfortChart(charts.c, ids.map((id, i) => {
+    const cam = cameras.find(c => c.id === id);
+    return { label: cam ? cam.name : id, color: multi ? CAM_COLORS[i % CAM_COLORS.length][1] : cssVar("--text"),
+      rows: s.rows.filter(r => r.camera_id === id) };
+  }));
 }
 
 document.getElementById("ranges").onclick = e => {
@@ -144,6 +159,7 @@ document.getElementById("from").value = toLocalInput(now - 86400);
 document.getElementById("to").value = toLocalInput(now);
 charts.t = makeChart(document.getElementById("ct"), "℃");
 charts.h = makeChart(document.getElementById("ch"), "%");
+charts.c = makeComfortChart(document.getElementById("cc"));
 refresh();
 setInterval(refresh, 30000);
 </script>
