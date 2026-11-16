@@ -64,7 +64,15 @@ class Database:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(SCHEMA)
+            self._migrate()
             self._conn.commit()
+
+    def _migrate(self):
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(readings)")}
+        for name, typ in (("orig_temperature", "REAL"), ("orig_humidity", "REAL"),
+                          ("orig_status", "TEXT"), ("edited_at", "INTEGER")):
+            if name not in cols:
+                self._conn.execute(f"ALTER TABLE readings ADD COLUMN {name} {typ}")
 
     def close(self):
         with self._lock:
@@ -137,8 +145,23 @@ class Database:
         return r[0] if r else None
 
     def correct_reading(self, rid: int, temperature, humidity) -> None:
-        self._x("UPDATE readings SET temperature=?, humidity=?, status='manual' WHERE id=?",
-                (temperature, humidity, rid))
+        """Overwrite values by hand. The values/status before the first edit are kept for revert."""
+        self._x("UPDATE readings SET"
+                " orig_temperature = CASE WHEN edited_at IS NULL THEN temperature ELSE orig_temperature END,"
+                " orig_humidity = CASE WHEN edited_at IS NULL THEN humidity ELSE orig_humidity END,"
+                " orig_status = CASE WHEN edited_at IS NULL THEN status ELSE orig_status END,"
+                " temperature=?, humidity=?, status='manual', edited_at=? WHERE id=?",
+                (temperature, humidity, int(time.time()), rid))
+
+    def revert_reading(self, rid: int) -> bool:
+        """Restore the automatically recorded values of an edited reading."""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE readings SET temperature=orig_temperature, humidity=orig_humidity, status=orig_status,"
+                " orig_temperature=NULL, orig_humidity=NULL, orig_status=NULL, edited_at=NULL"
+                " WHERE id=? AND edited_at IS NOT NULL", (rid,))
+            self._conn.commit()
+            return cur.rowcount > 0
 
     def set_status(self, rid: int, status: str) -> None:
         self._x("UPDATE readings SET status=? WHERE id=?", (status, rid))
@@ -204,6 +227,17 @@ class Database:
     def add_sample(self, cam_id: int, image_path: str, true_temp, true_hum) -> int:
         return self._x("INSERT INTO samples (camera_id, image_path, true_temp, true_hum, created_at)"
                        " VALUES (?,?,?,?,?)", (cam_id, image_path, true_temp, true_hum, int(time.time())))
+
+    def upsert_sample(self, cam_id: int, image_path: str, true_temp, true_hum) -> None:
+        """One sample per image: re-editing a reading updates its sample instead of duplicating it."""
+        r = self._q("SELECT id FROM samples WHERE camera_id=? AND image_path=?", (cam_id, image_path))
+        if r:
+            self._x("UPDATE samples SET true_temp=?, true_hum=? WHERE id=?", (true_temp, true_hum, r[0]["id"]))
+        else:
+            self.add_sample(cam_id, image_path, true_temp, true_hum)
+
+    def delete_samples_for_image(self, cam_id: int, image_path: str) -> None:
+        self._x("DELETE FROM samples WHERE camera_id=? AND image_path=?", (cam_id, image_path))
 
     def list_samples(self, cam_id: int) -> list[dict]:
         return self._q("SELECT * FROM samples WHERE camera_id=? ORDER BY id DESC", (cam_id,))

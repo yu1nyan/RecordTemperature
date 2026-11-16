@@ -91,3 +91,46 @@ def test_pages_render(client):
 def test_settings(client):
     r = client.put("/api/settings", json={"max_temp_jump": "3.5", "unknown": 1})
     assert r.json()["max_temp_jump"] == 3.5 and "unknown" not in r.json()
+
+
+def test_edit_confirmed_reading_and_revert(client):
+    db = client.db
+    cid = client.post("/api/cameras", json={"name": "A", "url": str(client.src)}).json()["id"]
+    now = int(time.time())
+    rid = db.add_reading(cid, now, "ok", 23.5, 56, 0.8, image_path="images/cam1/x.jpg")
+
+    # first edit keeps the automatically recorded values
+    r = client.post(f"/api/readings/{rid}/correct", json={"temperature": "24.1", "humidity": "57"}).json()["reading"]
+    assert (r["temperature"], r["humidity"], r["status"]) == (24.1, 57, "manual")
+    assert (r["orig_temperature"], r["orig_humidity"], r["orig_status"]) == (23.5, 56, "ok")
+    # re-edit: original stays, sample is updated rather than duplicated
+    r = client.post(f"/api/readings/{rid}/correct", json={"temperature": "24.3", "humidity": ""}).json()["reading"]
+    assert (r["temperature"], r["humidity"], r["orig_temperature"]) == (24.3, None, 23.5)
+    samples = db.list_samples(cid)
+    assert len(samples) == 1 and samples[0]["true_temp"] == 24.3
+
+    csv = client.get(f"/api/readings.csv?start={now - 60}&end={now + 60}").text
+    assert "24.3" in csv and "23.5" in csv
+
+    assert client.post(f"/api/readings/{rid}/correct", json={"temperature": "", "humidity": ""}).status_code == 400
+    assert client.post(f"/api/readings/{rid}/correct", json={"temperature": "abc"}).status_code == 400
+
+    r = client.post(f"/api/readings/{rid}/revert").json()["reading"]
+    assert (r["temperature"], r["humidity"], r["status"], r["edited_at"]) == (23.5, 56, "ok", None)
+    assert db.list_samples(cid) == []
+    assert client.post(f"/api/readings/{rid}/revert").status_code == 400
+
+
+def test_migration_adds_edit_columns(tmp_path):
+    import sqlite3
+    from recordtemp.db import Database
+    p = tmp_path / "old.db"
+    con = sqlite3.connect(p)
+    con.execute("CREATE TABLE readings (id INTEGER PRIMARY KEY, camera_id INTEGER, ts INTEGER, temperature REAL,"
+                " humidity REAL, status TEXT, confidence REAL, image_path TEXT, raw_text TEXT, message TEXT)")
+    con.commit()
+    con.close()
+    db = Database(p)
+    cols = {r["name"] for r in db._q("PRAGMA table_info(readings)")}
+    assert {"orig_temperature", "orig_humidity", "orig_status", "edited_at"} <= cols
+    db.close()

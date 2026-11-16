@@ -18,7 +18,7 @@
 </div>
 <div class="card">
   <div class="table-wrap"><table>
-    <thead><tr><th>日時</th><th>カメラ</th><th>温度(℃)</th><th>湿度(%)</th><th>状態</th><th>信頼度</th><th>読取文字</th><th>備考</th></tr></thead>
+    <thead><tr><th>日時</th><th>カメラ</th><th>温度(℃)</th><th>湿度(%)</th><th>状態</th><th>信頼度</th><th>操作</th><th>読取文字</th><th>備考</th></tr></thead>
     <tbody id="rows"></tbody>
   </table></div>
   <div class="row" style="margin-top:12px">
@@ -28,7 +28,57 @@
 {% endblock %}
 {% block scripts %}
 <script>
-let page = 1, total = 0, perPage = 100, names = {};
+let page = 1, total = 0, perPage = 100, names = {}, rowsById = {};
+
+function rowHtml(r, editing = false) {
+  const edited = r.edited_at !== null && r.edited_at !== undefined;
+  const origTip = edited ? `修正前: 温度 ${fmtNum(r.orig_temperature)} ℃ / 湿度 ${fmtNum(r.orig_humidity, 0)} %（${STATUS_LABEL[r.orig_status] || r.orig_status || "-"}）・${fmtTime(r.edited_at)} に修正` : "";
+  const valCells = editing
+    ? `<td class="num"><input type="number" step="0.1" id="et${r.id}" value="${r.temperature ?? ""}" style="width:80px"></td>
+       <td class="num"><input type="number" step="0.1" id="eh${r.id}" value="${r.humidity ?? ""}" style="width:70px"></td>`
+    : `<td class="num">${fmtNum(r.temperature)}</td><td class="num">${fmtNum(r.humidity, 0)}</td>`;
+  const ops = editing
+    ? `<button class="primary" data-save="${r.id}">保存</button> <button data-cancel="${r.id}">取消</button>`
+    : `<button data-edit="${r.id}">修正</button>${edited ? ` <button data-revert="${r.id}" title="自動記録された値に戻す">元に戻す</button>` : ""}`;
+  return `<tr id="row${r.id}">
+    <td>${fmtTime(r.ts, true)}</td><td>${esc(names[r.camera_id] || r.camera_id)}</td>
+    ${valCells}
+    <td title="${esc(origTip)}">${badge(r.status)}${edited ? ' <span class="small muted">✎</span>' : ""}</td>
+    <td class="num">${r.confidence === null ? "" : r.confidence.toFixed(2)}</td>
+    <td>${ops}</td>
+    <td class="small muted">${esc(r.raw_text || "")}</td>
+    <td class="small muted">${r.image_url ? `<a href="${r.image_url}" target="_blank">画像</a> ` : ""}${esc(origTip || r.message || "")}</td></tr>`;
+}
+function replaceRow(r, editing = false) {
+  rowsById[r.id] = Object.assign(rowsById[r.id] || {}, r);
+  document.getElementById("row" + r.id).outerHTML = rowHtml(rowsById[r.id], editing);
+  if (editing) document.getElementById("et" + r.id).focus();
+}
+document.getElementById("rows").addEventListener("click", async e => {
+  const b = e.target.closest("button"); if (!b) return;
+  try {
+    if (b.dataset.edit) replaceRow(rowsById[b.dataset.edit], true);
+    else if (b.dataset.cancel) replaceRow(rowsById[b.dataset.cancel]);
+    else if (b.dataset.save) {
+      const id = b.dataset.save;
+      const t = document.getElementById("et" + id).value, h = document.getElementById("eh" + id).value;
+      const res = await api("POST", `/api/readings/${id}/correct`, { temperature: t, humidity: h, add_sample: true });
+      replaceRow(Object.assign(res.reading, { image_url: rowsById[id].image_url }));
+      toast("修正しました");
+    } else if (b.dataset.revert) {
+      const id = b.dataset.revert;
+      const res = await api("POST", `/api/readings/${id}/revert`);
+      replaceRow(Object.assign(res.reading, { image_url: rowsById[id].image_url }));
+      toast("自動記録の値に戻しました");
+    }
+  } catch (err) { toast("エラー: " + err.message); }
+});
+document.getElementById("rows").addEventListener("keydown", e => {
+  if (e.target.tagName !== "INPUT") return;
+  const id = e.target.id.slice(2);
+  if (e.key === "Enter") document.querySelector(`[data-save="${id}"]`).click();
+  if (e.key === "Escape") document.querySelector(`[data-cancel="${id}"]`).click();
+});
 function params() {
   const cam = document.getElementById("cam").value;
   return `camera_ids=${cam}&start=${fromLocalInput(document.getElementById("from").value) || ""}` +
@@ -38,13 +88,9 @@ async function load() {
   const st = document.getElementById("status").value;
   const d = await api("GET", `/api/table?${params()}&status=${st}&page=${page}&per_page=${perPage}`);
   total = d.total;
-  document.getElementById("rows").innerHTML = d.rows.map(r => `<tr>
-    <td>${fmtTime(r.ts, true)}</td><td>${esc(names[r.camera_id] || r.camera_id)}</td>
-    <td class="num">${fmtNum(r.temperature)}</td><td class="num">${fmtNum(r.humidity, 0)}</td>
-    <td>${badge(r.status)}</td><td class="num">${r.confidence === null ? "" : r.confidence.toFixed(2)}</td>
-    <td class="small muted">${esc(r.raw_text || "")}</td>
-    <td class="small muted">${r.image_url ? `<a href="${r.image_url}" target="_blank">画像</a> ` : ""}${esc(r.message || "")}</td></tr>`).join("")
-    || `<tr><td colspan="8" class="muted">記録がありません</td></tr>`;
+  rowsById = Object.fromEntries(d.rows.map(r => [r.id, r]));
+  document.getElementById("rows").innerHTML = d.rows.map(rowHtml).join("")
+    || `<tr><td colspan="9" class="muted">記録がありません</td></tr>`;
   const pages = Math.max(1, Math.ceil(total / perPage));
   document.getElementById("pageinfo").textContent = `${page} / ${pages} ページ（${total} 件）`;
   document.getElementById("prev").disabled = page <= 1;

@@ -212,11 +212,13 @@ def create_app(recorder: Recorder, scheduler=None) -> FastAPI:
         buf = io.StringIO()
         buf.write("﻿")  # BOM so Excel opens UTF-8 correctly
         w = csv.writer(buf)
-        w.writerow(["日時", "カメラ", "温度(℃)", "湿度(%)", "状態", "信頼度"])
+        w.writerow(["日時", "カメラ", "温度(℃)", "湿度(%)", "状態", "信頼度", "修正前温度(℃)", "修正前湿度(%)"])
         for r in reversed(rows):
+            edited = r.get("edited_at") is not None
             w.writerow([datetime.fromtimestamp(r["ts"]).strftime("%Y-%m-%d %H:%M:%S"),
                         names.get(r["camera_id"], r["camera_id"]), r["temperature"], r["humidity"],
-                        r["status"], r["confidence"]])
+                        r["status"], r["confidence"],
+                        r["orig_temperature"] if edited else "", r["orig_humidity"] if edited else ""])
         fname = f"readings_{datetime.fromtimestamp(start):%Y%m%d%H%M}-{datetime.fromtimestamp(end):%Y%m%d%H%M}.csv"
         return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv; charset=utf-8",
                                  headers={"Content-Disposition": f'attachment; filename="{fname}"'})
@@ -235,11 +237,27 @@ def create_app(recorder: Recorder, scheduler=None) -> FastAPI:
         r = db.get_reading(rid)
         if not r:
             raise HTTPException(404)
-        t, h = _num(body.get("temperature")), _num(body.get("humidity"))
+        try:
+            t, h = _num(body.get("temperature")), _num(body.get("humidity"))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "数値を入力してください")
+        if t is None and h is None:
+            raise HTTPException(400, "温度か湿度の少なくとも一方を入力してください")
         db.correct_reading(rid, t, h)
         if body.get("add_sample", True) and r["image_path"]:
-            db.add_sample(r["camera_id"], r["image_path"], t, h)
-        return {"ok": True}
+            db.upsert_sample(r["camera_id"], r["image_path"], t, h)
+        return {"ok": True, "reading": db.get_reading(rid)}
+
+    @app.post("/api/readings/{rid}/revert")
+    def revert(rid: int):
+        r = db.get_reading(rid)
+        if not r:
+            raise HTTPException(404)
+        if not db.revert_reading(rid):
+            raise HTTPException(400, "この記録は修正されていません")
+        if r["image_path"]:
+            db.delete_samples_for_image(r["camera_id"], r["image_path"])
+        return {"ok": True, "reading": db.get_reading(rid)}
 
     @app.post("/api/readings/{rid}/dismiss")
     def dismiss(rid: int):
