@@ -134,3 +134,14 @@ def test_migration_adds_edit_columns(tmp_path):
     cols = {r["name"] for r in db._q("PRAGMA table_info(readings)")}
     assert {"orig_temperature", "orig_humidity", "orig_status", "edited_at"} <= cols
     db.close()
+
+
+def test_series_includes_outdoor_and_station_setting(client):
+    now = int(time.time())
+    client.db.add_outdoor("44071", [(now - 600, 12.3, 45.0), (now, 12.1, 46.0)])
+    od = client.get(f"/api/series?start={now - 3600}&end={now + 60}").json()["outdoor"]
+    assert od["station"] == "44071" and [r["temperature"] for r in od["rows"]] == [12.3, 12.1]
+    assert client.put("/api/settings", json={"amedas_station": "abc"}).status_code == 400
+    assert client.put("/api/settings", json={"amedas_station": " 44132 "}).json()["amedas_station"] == "44132"
+    assert client.put("/api/settings", json={"amedas_enabled": False}).json()["amedas_enabled"] is False
+    assert client.get("/api/series").json()["outdoor"] is None

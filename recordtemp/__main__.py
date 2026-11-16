@@ -69,11 +69,14 @@ def main(argv=None) -> int:
     recorder = Recorder(cfg, db)
     scheduler = Scheduler(recorder, cfg["interval_sec"])
     scheduler.start()
+    from .amedas import AmedasSyncer
+    amedas_syncer = AmedasSyncer(cfg, db)
+    amedas_syncer.start()
 
     import uvicorn
     from .web.app import create_app
     port = args.port or cfg["port"]
-    server = uvicorn.Server(uvicorn.Config(create_app(recorder, scheduler), host=cfg["host"], port=port,
+    server = uvicorn.Server(uvicorn.Config(create_app(recorder, scheduler, amedas_syncer), host=cfg["host"], port=port,
                                            log_config=None, access_log=False))
     url = f"http://127.0.0.1:{port}/"
     web = threading.Thread(target=server.run, name="web", daemon=True)
@@ -85,6 +88,7 @@ def main(argv=None) -> int:
     def shutdown():
         log.info("shutting down")
         scheduler.stop()
+        amedas_syncer.stop()
         server.should_exit = True
 
     try:

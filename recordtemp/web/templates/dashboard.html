@@ -20,7 +20,7 @@
   <div id="custom" class="row" style="display:none;margin-bottom:12px">
     <input type="datetime-local" id="from"> 〜 <input type="datetime-local" id="to"> <button id="apply">表示</button>
   </div>
-  <div id="camsel" class="row small" style="margin-bottom:8px"></div>
+  <div class="row small" style="margin-bottom:8px"><div id="camsel" class="row"></div><div id="outdoorsel" class="row"></div></div>
   <h2 class="disp-temp" style="font-size:14px">温度 (℃)</h2>
   <div class="chart-box"><canvas id="ct"></canvas></div>
   <h2 class="disp-hum" style="font-size:14px;margin-top:16px">湿度 (%)</h2>
@@ -40,7 +40,7 @@
 {% endblock %}
 {% block scripts %}
 <script>
-let rangeH = 24, cameras = [], hidden = new Set(), charts = {}, interval = 60;
+let rangeH = 24, cameras = [], hidden = new Set(), charts = {}, interval = 60, showOutdoor = true;
 
 function card(c) {
   const cam = c.camera, g = c.last_good, last = c.last;
@@ -110,13 +110,23 @@ function toPoints(rows, key, gap) {
   return pts;
 }
 
+function renderOutdoorToggle(od) {
+  const el = document.getElementById("outdoorsel");
+  if (!od) { el.innerHTML = ""; return; }
+  const note = od.error ? ` <span class="muted" title="${esc(od.error)}">（取得エラー）</span>`
+    : od.rows.length ? "" : ' <span class="muted">（データ取得待ち）</span>';
+  el.innerHTML = `<label class="inline"><input type="checkbox" id="outdoorcb" ${showOutdoor ? "checked" : ""}> 外気（アメダス ${esc(od.name)}）</label>${note}`;
+  document.getElementById("outdoorcb").onchange = e => { showOutdoor = e.target.checked; loadSeries(); };
+}
+
 async function loadSeries() {
   let start, end;
   if (rangeH) { end = Math.floor(Date.now() / 1000); start = end - rangeH * 3600; }
   else { start = fromLocalInput(document.getElementById("from").value); end = fromLocalInput(document.getElementById("to").value); }
   const ids = cameras.filter(c => !hidden.has(c.id)).map(c => c.id);
-  if (!ids.length) { updateComfortChart(charts.c, []); charts.t.data.datasets = []; charts.h.data.datasets = []; charts.t.update(); charts.h.update(); return; }
-  const s = await api("GET", `/api/series?camera_ids=${ids.join(",")}&start=${start || ""}&end=${end || ""}`);
+  const s = await api("GET", `/api/series?camera_ids=${ids.join(",") || "0"}&start=${start || ""}&end=${end || ""}`);
+  const od = s.outdoor;
+  renderOutdoorToggle(od);
   const gap = Math.max(s.bucket, interval) * 3;
   const multi = ids.length > 1;
   for (const [key, chart, ci] of [["temperature", charts.t, 0], ["humidity", charts.h, 1]]) {
@@ -126,8 +136,13 @@ async function loadSeries() {
       return { label: cam ? cam.name : id, data: toPoints(s.rows.filter(r => r.camera_id === id), key, gap),
         borderColor: color, backgroundColor: color, spanGaps: false };
     });
+    if (od && showOutdoor) {
+      const color = cssVar("--muted");
+      chart.data.datasets.push({ label: `外気（${od.name}）`, data: toPoints(od.rows, key, Math.max(s.bucket, 600) * 3),
+        borderColor: color, backgroundColor: color, borderDash: [6, 4], borderWidth: 1.5, spanGaps: false, tension: 0.3 });
+    }
     chart.options.scales.x.min = s.start * 1000; chart.options.scales.x.max = s.end * 1000;
-    chart.options.plugins.legend.display = multi;
+    chart.options.plugins.legend.display = chart.data.datasets.length > 1;
     chart.update();
   }
   document.getElementById("bucketinfo").textContent = s.bucket ? `${s.bucket / 60}分平均で表示` : "";

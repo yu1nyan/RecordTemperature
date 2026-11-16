@@ -31,6 +31,16 @@
   </div>
 </div>
 <div class="card">
+  <h2>外気（気象庁アメダス）</h2>
+  <div class="form-grid">
+    <label class="inline"><input type="checkbox" data-k="amedas_enabled"> 外気の気温・湿度をグラフに表示する</label>
+    <label>観測所番号<input type="text" data-k="amedas_station" inputmode="numeric" style="width:120px"></label>
+  </div>
+  <p class="small muted">10分ごとに気象庁サイトから取得します（初回は過去約9日分をさかのぼって取得）。
+    中野区内には観測所がないため、既定は最寄りで湿度も観測している <strong>練馬 44071</strong>（約7km）です。
+    ほかの候補: 東京（千代田区北の丸）44132、世田谷 44116。湿度を観測していない観測所では気温のみ表示されます。</p>
+</div>
+<div class="card">
   <h2>Web 画面</h2>
   <div class="form-grid">
     <label>待ち受けアドレス ※再起動後に反映<select data-k="host"><option value="127.0.0.1">127.0.0.1（このPCのみ）</option><option value="0.0.0.0">0.0.0.0（LAN内の他端末からも閲覧）</option></select></label>
@@ -56,7 +66,7 @@ document.getElementById("save").onclick = async () => {
     const k = el.dataset.k;
     if (el.type === "checkbox") out[k] = el.checked;
     else if (el.dataset.i !== undefined) { out[k] = out[k] || cfg[k].slice(); out[k][+el.dataset.i] = +el.value; }
-    else out[k] = el.tagName === "SELECT" ? el.value : +el.value;
+    else out[k] = el.tagName === "SELECT" || el.type === "text" ? el.value : +el.value;
   });
   try { await api("PUT", "/api/settings", out); toast("保存しました"); load(); }
   catch (e) { toast("エラー: " + e.message); }

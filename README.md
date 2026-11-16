@@ -69,6 +69,7 @@ Start-ScheduledTask -TaskName RecordTemperature   # すぐ起動する場合
    5. 「校正を保存」
 3. **ダッシュボード**で最新値とグラフ（1時間〜30日・期間指定、複数カメラ重ね表示）、**記録一覧**で表と CSV 出力
    - ダッシュボード下部の**快適温湿度チャート**（横軸=湿度・縦軸=温度）に、同じ期間の記録を点で表示します。PMV（ISO 7730）等値線・快適域・絶対湿度 7/11g/m³ の線・カビ/ダニの目安範囲を背景に描画します
+   - 温度・湿度グラフには**外気（気象庁アメダス）**を破線で重ねて表示します。既定は中野区に最寄りで湿度も観測している練馬（44071）。10分ごとに取得し、初回は過去約9日分をさかのぼります。観測所番号は設定画面で変更できます
    - 記録一覧の「修正」で、確定済みの温度・湿度をあとから手で修正できます（状態は「手入力」になり、✎印が付きます）
    - 修正前の自動記録値は保持され、「元に戻す」でいつでも復元できます。CSV にも修正前の値の列が出力されます
 4. **読取確認**に失敗した記録が画像付きで並ぶので、正しい値を入力して修正。
@@ -97,7 +98,7 @@ Start-ScheduledTask -TaskName RecordTemperature   # すぐ起動する場合
 
 すべて `data/` に保存されます（Git 管理外。環境変数 `RECORDTEMP_DATA` で変更可）。
 
-- `recordtemp.db` … SQLite（cameras / readings / calibrations / samples）
+- `recordtemp.db` … SQLite（cameras / readings / calibrations / samples / outdoor＝アメダス）
 - `images/camN/` … 最新フレーム、校正用画像、失敗した読み取りの画像（既定30日で自動削除）
 - `logs/recordtemp.log` … ログ
 - `config.json` … 設定（Web の設定画面から変更可）

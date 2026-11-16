@@ -49,6 +49,13 @@ CREATE TABLE IF NOT EXISTS samples (
     true_hum REAL,
     created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS outdoor (     -- AMeDAS observations (10-minute)
+    station TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    temperature REAL,
+    humidity REAL,
+    PRIMARY KEY (station, ts)
+);
 """
 
 GOOD_STATUSES = ("ok", "manual")
@@ -238,6 +245,29 @@ class Database:
 
     def delete_samples_for_image(self, cam_id: int, image_path: str) -> None:
         self._x("DELETE FROM samples WHERE camera_id=? AND image_path=?", (cam_id, image_path))
+
+    # ------------------------------------------------------------- outdoor (AMeDAS)
+    def last_outdoor_ts(self, station: str) -> int | None:
+        r = self._q("SELECT MAX(ts) AS ts FROM outdoor WHERE station=?", (str(station),))
+        return r[0]["ts"] if r else None
+
+    def add_outdoor(self, station: str, rows) -> int:
+        rows = [(str(station), int(ts), t, h) for ts, t, h in rows]
+        if rows:
+            with self._lock:
+                self._conn.executemany("INSERT OR REPLACE INTO outdoor (station, ts, temperature, humidity)"
+                                       " VALUES (?,?,?,?)", rows)
+                self._conn.commit()
+        return len(rows)
+
+    def outdoor_series(self, station: str, start: int, end: int, bucket: int = 0) -> list[dict]:
+        args = (str(station), start, end)
+        if bucket and bucket > 600:
+            return self._q(f"SELECT (ts/{int(bucket)})*{int(bucket)} AS ts, AVG(temperature) AS temperature,"
+                           f" AVG(humidity) AS humidity FROM outdoor WHERE station=? AND ts BETWEEN ? AND ?"
+                           f" GROUP BY ts/{int(bucket)} ORDER BY ts", args)
+        return self._q("SELECT ts, temperature, humidity FROM outdoor WHERE station=? AND ts BETWEEN ? AND ?"
+                       " ORDER BY ts", args)
 
     def list_samples(self, cam_id: int) -> list[dict]:
         return self._q("SELECT * FROM samples WHERE camera_id=? ORDER BY id DESC", (cam_id,))

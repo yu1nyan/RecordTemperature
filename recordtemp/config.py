@@ -25,6 +25,8 @@ DEFAULTS = {
     "min_align_cc": 0.6,
     "capture_timeout_sec": 15,
     "capture_retries": 3,
+    "amedas_enabled": True,       # plot outdoor temperature/humidity from JMA AMeDAS
+    "amedas_station": "44071",    # 練馬 (nearest station to Nakano-ku that also measures humidity)
 }
 
 

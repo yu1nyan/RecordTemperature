@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import csv
 import io
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -14,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .. import camera
+from .. import amedas, camera
 from ..config import DEFAULTS
 from ..scheduler import Recorder
 from ..sevenseg import pipeline as P
@@ -36,7 +37,7 @@ def _num(v):
     return float(v)
 
 
-def create_app(recorder: Recorder, scheduler=None) -> FastAPI:
+def create_app(recorder: Recorder, scheduler=None, amedas_syncer=None) -> FastAPI:
     cfg, db = recorder.cfg, recorder.db
     app = FastAPI(title="RecordTemperature")
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
@@ -188,7 +189,13 @@ def create_app(recorder: Recorder, scheduler=None) -> FastAPI:
         span = end - start
         bucket = 0 if span <= 2 * 86400 else max(120, (span // 1500) // 60 * 60)
         rows = db.series(_ids(camera_ids), start, end, bucket)
-        return {"bucket": bucket, "start": start, "end": end, "rows": rows}
+        out = {"bucket": bucket, "start": start, "end": end, "rows": rows, "outdoor": None}
+        if cfg["amedas_enabled"]:
+            st = str(cfg["amedas_station"]).strip()
+            out["outdoor"] = {"station": st, "name": amedas.station_name(st),
+                              "rows": db.outdoor_series(st, start, end, bucket),
+                              "error": amedas_syncer.last_error if amedas_syncer else None}
+        return out
 
     @app.get("/api/table")
     def table(camera_ids: str | None = None, start: int | None = None, end: int | None = None,
@@ -420,10 +427,17 @@ def create_app(recorder: Recorder, scheduler=None) -> FastAPI:
                     v = float(v)
                 elif isinstance(d, list):
                     v = [float(x) for x in v]
+                elif isinstance(d, str):
+                    v = str(v).strip()
             except (TypeError, ValueError):
                 raise HTTPException(400, f"不正な値: {k}")
             clean[k] = v
+        if "amedas_station" in clean and not clean["amedas_station"].isdigit():
+            raise HTTPException(400, "アメダス観測所番号は数字で入力してください（例: 練馬 44071）")
+        changed = any(clean.get(k, cfg[k]) != cfg[k] for k in ("amedas_enabled", "amedas_station"))
         cfg.update(clean)
+        if changed and cfg["amedas_enabled"] and amedas_syncer:
+            threading.Thread(target=amedas_syncer.run_once, daemon=True).start()
         return cfg.as_dict()
 
     return app
