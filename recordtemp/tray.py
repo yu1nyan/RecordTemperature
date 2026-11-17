@@ -19,7 +19,7 @@ def make_icon(size: int = 64) -> Image.Image:
     return img
 
 
-def run_tray(url: str, on_capture, on_quit) -> None:
+def run_tray(url: str, on_capture, on_quit, overlay=None) -> None:
     """Blocks until the user chooses 終了."""
     import pystray
 
@@ -33,9 +33,15 @@ def run_tray(url: str, on_capture, on_quit) -> None:
         on_quit()
         icon.stop()
 
-    menu = pystray.Menu(
+    items = [
         pystray.MenuItem("ブラウザで開く", open_ui, default=True),
         pystray.MenuItem("今すぐ撮影", capture),
+    ]
+    if overlay is not None:
+        items.append(pystray.MenuItem("温湿度の小窓を表示", lambda icon, item: overlay.toggle(),
+                                      checked=lambda item: overlay.visible))
+    menu = pystray.Menu(
+        *items,
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("終了", quit_app),
     )

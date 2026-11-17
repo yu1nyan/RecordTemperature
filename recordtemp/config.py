@@ -27,6 +27,11 @@ DEFAULTS = {
     "capture_retries": 3,
     "amedas_enabled": True,       # plot outdoor temperature/humidity from JMA AMeDAS
     "amedas_station": "44071",    # 練馬 (nearest station to Nakano-ku that also measures humidity)
+    "overlay_enabled": True,      # small always-on-top window with the latest reading
+    "overlay_camera_id": 0,       # 0 = first enabled camera
+    "overlay_alpha": 0.9,
+    "overlay_x": -1,              # -1 = bottom-right of the primary screen
+    "overlay_y": -1,
 }
 
 

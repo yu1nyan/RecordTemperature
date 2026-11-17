@@ -98,6 +98,9 @@ def main(argv=None) -> int:
     web.start()
     log.info("started: %s (data: %s)", url, cfg.data_dir)
     write_endpoint(port)
+    from .overlay import Overlay
+    overlay = Overlay(cfg, db, url)
+    overlay.start()
     if args.open:
         threading.Timer(1.5, webbrowser.open, args=(url,)).start()
 
@@ -105,6 +108,7 @@ def main(argv=None) -> int:
         log.info("shutting down")
         scheduler.stop()
         amedas_syncer.stop()
+        overlay.stop()
         server.should_exit = True
 
     try:
@@ -114,13 +118,14 @@ def main(argv=None) -> int:
         else:
             from .tray import run_tray
             run_tray(url, on_capture=lambda: threading.Thread(target=recorder.capture_all, daemon=True).start(),
-                     on_quit=shutdown)
+                     on_quit=shutdown, overlay=overlay)
     except KeyboardInterrupt:
         pass
     finally:
         shutdown()
         web.join(timeout=5)
         scheduler.join(timeout=5)
+        overlay.join(timeout=3)
         db.close()
     return 0
 

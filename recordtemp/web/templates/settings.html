@@ -41,6 +41,17 @@
     ほかの候補: 東京（千代田区北の丸）44132、世田谷 44116。湿度を観測していない観測所では気温のみ表示されます。</p>
 </div>
 <div class="card">
+  <h2>画面の小窓</h2>
+  <div class="form-grid">
+    <label class="inline"><input type="checkbox" data-k="overlay_enabled"> 最新の温湿度を小窓で常に表示する</label>
+    <label>表示するカメラ<select data-k="overlay_camera_id" id="overlay_cam"><option value="0">自動（最初の有効なカメラ）</option></select></label>
+    <label>不透明度（0.3〜1）<input type="number" step="0.05" min="0.3" max="1" data-k="overlay_alpha"></label>
+    <label>&nbsp;<button type="button" id="overlay_reset">位置を初期位置（右下）に戻す</button></label>
+  </div>
+  <p class="small muted">画面の手前に常に表示される小さな窓です。ドラッグで移動、右クリックでカメラの切り替え、ダブルクリックでこの画面を開けます。
+    全画面表示のアプリを使っている間は自動で隠れます。マウスを乗せると絶対湿度などの詳細が出ます。</p>
+</div>
+<div class="card">
   <h2>Web 画面</h2>
   <div class="form-grid">
     <label>待ち受けアドレス ※再起動後に反映<select data-k="host"><option value="127.0.0.1">127.0.0.1（このPCのみ）</option><option value="0.0.0.0">0.0.0.0（LAN内の他端末からも閲覧）</option></select></label>
@@ -71,6 +82,15 @@ document.getElementById("save").onclick = async () => {
   try { await api("PUT", "/api/settings", out); toast("保存しました"); load(); }
   catch (e) { toast("エラー: " + e.message); }
 };
-load();
+document.getElementById("overlay_reset").onclick = async () => {
+  try { await api("PUT", "/api/settings", { overlay_x: -1, overlay_y: -1 }); toast("小窓を右下に戻しました"); }
+  catch (e) { toast("エラー: " + e.message); }
+};
+(async () => {
+  const cams = await api("GET", "/api/cameras");
+  cams.forEach(c => document.getElementById("overlay_cam").insertAdjacentHTML("beforeend",
+    `<option value="${c.id}">${esc(c.name)}</option>`));
+  load();
+})();
 </script>
 {% endblock %}

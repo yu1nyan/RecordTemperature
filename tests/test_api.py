@@ -145,3 +145,9 @@ def test_series_includes_outdoor_and_station_setting(client):
     assert client.put("/api/settings", json={"amedas_station": " 44132 "}).json()["amedas_station"] == "44132"
     assert client.put("/api/settings", json={"amedas_enabled": False}).json()["amedas_enabled"] is False
     assert client.get("/api/series").json()["outdoor"] is None
+
+
+def test_overlay_settings(client):
+    r = client.put("/api/settings", json={"overlay_camera_id": "2", "overlay_alpha": "0.75", "overlay_x": -1,
+                                          "overlay_enabled": False}).json()
+    assert (r["overlay_camera_id"], r["overlay_alpha"], r["overlay_x"], r["overlay_enabled"]) == (2, 0.75, -1, False)
