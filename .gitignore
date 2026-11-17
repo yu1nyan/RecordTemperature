@@ -19,3 +19,9 @@ data/
 .idea/
 Thumbs.db
 desktop.ini
+
+# node
+node_modules/
+# Windows widget (C#) build output
+widget/bin/
+widget/obj/

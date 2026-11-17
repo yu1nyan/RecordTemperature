@@ -1,0 +1,62 @@
+{
+  "type": "AdaptiveCard",
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "${name}",
+      "size": "small",
+      "isSubtle": true,
+      "wrap": false
+    },
+    {
+      "type": "ColumnSet",
+      "spacing": "small",
+      "columns": [
+        {
+          "type": "Column",
+          "width": "auto",
+          "items": [
+            { "type": "TextBlock", "text": "${temp}", "size": "extraLarge", "weight": "bolder" },
+            { "type": "TextBlock", "text": "温度", "size": "small", "isSubtle": true, "spacing": "none" }
+          ]
+        },
+        {
+          "type": "Column",
+          "width": "auto",
+          "spacing": "large",
+          "items": [
+            { "type": "TextBlock", "text": "${hum}", "size": "extraLarge", "weight": "bolder" },
+            { "type": "TextBlock", "text": "湿度", "size": "small", "isSubtle": true, "spacing": "none" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "絶対湿度 ${abs}",
+      "size": "small",
+      "spacing": "medium"
+    },
+    {
+      "type": "TextBlock",
+      "text": "${flu}",
+      "color": "${fluColor}",
+      "weight": "bolder",
+      "spacing": "small",
+      "wrap": true
+    },
+    {
+      "type": "TextBlock",
+      "text": "${updated}",
+      "size": "small",
+      "isSubtle": true,
+      "spacing": "small",
+      "wrap": true
+    }
+  ],
+  "actions": [
+    { "type": "Action.Execute", "verb": "open", "title": "ダッシュボードを開く" }
+  ]
+}

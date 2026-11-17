@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ウィジェット提供アプリのパッケージ定義。build.ps1 がビルド結果と一緒に bin\layout へコピーし、
+  開発者モードで Add-AppxPackage -Register により登録する（署名なしの開発用登録）。
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 com rescap">
+
+  <Identity
+    Name="yu1nyan.RecordTemperatureWidget"
+    Publisher="CN=yu1nyan"
+    Version="1.0.0.0"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>温湿度記録ウィジェット</DisplayName>
+    <PublisherDisplayName>yu1nyan</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22621.0" MaxVersionTested="10.0.26100.0" />
+    <!-- RecordTemperatureWidget.csproj の Microsoft.WindowsAppSDK 1.6.250602001 に対応する版 -->
+    <PackageDependency
+      Name="Microsoft.WindowsAppRuntime.1.6"
+      MinVersion="6000.519.329.0"
+      Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="ja-JP" />
+  </Resources>
+
+  <Applications>
+    <Application Id="App" Executable="RecordTemperatureWidget.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="温湿度記録ウィジェット"
+        Description="RecordTemperature の最新の温度・湿度をウィジェットに表示します"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png"
+        AppListEntry="none" />
+
+      <Extensions>
+        <!-- ウィジェットホストがこの exe を COM サーバーとして起動する -->
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:ExeServer Executable="RecordTemperatureWidget.exe" Arguments="-RegisterProcessAsComServer" DisplayName="温湿度記録ウィジェット">
+              <com:Class Id="EB477AAF-E3B8-400E-A75E-22FE72B15225" DisplayName="RecordTemperature WidgetProvider" />
+            </com:ExeServer>
+          </com:ComServer>
+        </com:Extension>
+
+        <!-- ウィジェットの定義 -->
+        <uap3:Extension Category="windows.appExtension">
+          <uap3:AppExtension
+            Name="com.microsoft.windows.widgets"
+            DisplayName="温湿度記録"
+            Id="RecordTemperatureWidgetProvider"
+            PublicFolder="Public">
+            <uap3:Properties>
+              <WidgetProvider>
+                <ProviderIcons>
+                  <Icon Path="Assets\StoreLogo.png" />
+                </ProviderIcons>
+                <Activation>
+                  <CreateInstance ClassId="EB477AAF-E3B8-400E-A75E-22FE72B15225" />
+                </Activation>
+                <Definitions>
+                  <Definition
+                    Id="RoomClimate"
+                    DisplayName="室内の温湿度"
+                    Description="温度・湿度・絶対湿度と、インフルエンザの目安（注意・警戒）を表示します。表示するカメラはウィジェットのカスタマイズで選べます。"
+                    AllowMultiple="true"
+                    IsCustomizable="true">
+                    <Capabilities>
+                      <Capability>
+                        <Size Name="small" />
+                      </Capability>
+                      <Capability>
+                        <Size Name="medium" />
+                      </Capability>
+                    </Capabilities>
+                    <ThemeResources>
+                      <Icons>
+                        <Icon Path="Assets\WidgetIcon.png" />
+                      </Icons>
+                      <Screenshots>
+                        <Screenshot Path="Assets\Screenshot_Light.png" DisplayAltText="室内の温度・湿度とインフルエンザの目安を表示するウィジェット" />
+                      </Screenshots>
+                      <DarkMode>
+                        <Screenshots>
+                          <Screenshot Path="Assets\Screenshot_Dark.png" DisplayAltText="室内の温度・湿度とインフルエンザの目安を表示するウィジェット" />
+                        </Screenshots>
+                      </DarkMode>
+                      <LightMode />
+                    </ThemeResources>
+                  </Definition>
+                </Definitions>
+              </WidgetProvider>
+            </uap3:Properties>
+          </uap3:AppExtension>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

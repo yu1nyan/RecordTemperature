@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Windows 11 のウィジェットボードに温湿度を表示する「ウィジェット提供アプリ」。
+    ウィジェットホストから COM サーバーとして起動され、RecordTemperature の Web API から値を取って表示する。
+    パッケージ（AppxManifest.xml）は手書きして、build.ps1 で開発用に登録する。
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.22621.0</TargetPlatformMinVersion>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>RecordTemperatureWidget</RootNamespace>
+    <SatelliteResourceLanguages>ja</SatelliteResourceLanguages>
+
+    <!--
+      パッケージは自前で作るので Windows App SDK の MSIX ツールは使わない。
+      パッケージとして実行され、Windows App Runtime はパッケージの依存関係から読み込まれるので、
+      パッケージなしアプリ向けの自動初期化（Bootstrap など）は無効にする。
+    -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSdkBootstrapInitialize>false</WindowsAppSdkBootstrapInitialize>
+    <WindowsAppSdkUndockedRegFreeWinRTInitialize>false</WindowsAppSdkUndockedRegFreeWinRTInitialize>
+    <WindowsAppSdkDeploymentManagerInitialize>false</WindowsAppSdkDeploymentManagerInitialize>
+    <!-- 画面リソース（PRI）は使わない。生成には Visual Studio の部品が必要なので無効にする -->
+    <EnableCoreMrtTooling>false</EnableCoreMrtTooling>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Package/AppxManifest.xml の PackageDependency（Microsoft.WindowsAppRuntime.1.6）と合わせる -->
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.250602001" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Templates\*.json" LogicalName="%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

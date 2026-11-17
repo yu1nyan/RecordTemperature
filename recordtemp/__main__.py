@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -9,6 +10,7 @@ import threading
 import time
 import webbrowser
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from .config import Config
 from .db import Database
@@ -29,6 +31,19 @@ def acquire_single_instance() -> bool:
     kernel32.CreateMutexW.restype = ctypes.c_void_p
     _mutex = kernel32.CreateMutexW(None, False, MUTEX_NAME)
     return kernel32.GetLastError() != 183  # ERROR_ALREADY_EXISTS
+
+
+def write_endpoint(port: int) -> None:
+    r"""Tell the Windows widget (widget/) where the web API is: %LOCALAPPDATA%\RecordTemperature\endpoint.json"""
+    base = os.environ.get("LOCALAPPDATA")
+    if not base:
+        return
+    path = Path(base) / "RecordTemperature" / "endpoint.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"url": f"http://127.0.0.1:{port}"}), encoding="utf-8")
+    except OSError as e:
+        log.warning("could not write %s: %s", path, e)
 
 
 def setup_logging(cfg: Config, console: bool) -> None:
@@ -82,6 +97,7 @@ def main(argv=None) -> int:
     web = threading.Thread(target=server.run, name="web", daemon=True)
     web.start()
     log.info("started: %s (data: %s)", url, cfg.data_dir)
+    write_endpoint(port)
     if args.open:
         threading.Timer(1.5, webbrowser.open, args=(url,)).start()
 

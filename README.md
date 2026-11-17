@@ -73,6 +73,26 @@ Start-ScheduledTask -TaskName RecordTemperature   # すぐ起動する場合
 
 解除: `powershell -ExecutionPolicy Bypass -File scripts\uninstall_autostart.ps1`
 
+### Windows 11 のウィジェット（任意）
+
+ウィジェットボード（Win+W）に、カメラごとの最新の温度・湿度・絶対湿度と、インフルエンザの目安（低リスク／注意／警戒）を表示できます。
+`widget/` の C# アプリ（Windows App SDK のウィジェット提供アプリ）が、常駐中の RecordTemperature の Web API から値を取って表示します。
+
+必要なもの: Windows 11、**開発者モード**（設定 → システム → 開発者向け）、[.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)、Windows App Runtime 1.6
+
+```powershell
+powershell -ExecutionPolicy Bypass -File widget\build.ps1      # ビルドしてこのPCに登録
+```
+
+1. Win+W でウィジェットボードを開き、「+」→「温湿度記録」の「室内の温湿度」を追加（小・中サイズ）
+2. 表示するカメラは、ウィジェット右上の「…」→「ウィジェットのカスタマイズ」で選ぶ（ウィジェットを複数置けばカメラごとに表示可能）
+3. 中サイズの「ダッシュボードを開く」でブラウザの画面が開く
+
+- ウィジェットは、RecordTemperature が起動時に書き出す `%LOCALAPPDATA%\RecordTemperature\endpoint.json` から接続先を読みます（ないときはポート 8765）
+- 動作ログ: `%LOCALAPPDATA%\Packages\yu1nyan.RecordTemperatureWidget_*\LocalState\widget.log`
+- アイコン等の画像は `widget\make_assets.py` で生成しています
+- 解除: `powershell -ExecutionPolicy Bypass -File widget\uninstall.ps1`
+
 ## 使い方
 
 1. **カメラ・校正** → 「カメラを追加」で IP・カメラアカウントを入力し「接続テスト」
