@@ -10,41 +10,66 @@
   <h2 id="formtitle">カメラを追加</h2>
   <div class="form-grid">
     <label>名前<input id="f_name" placeholder="例: リビング"></label>
-    <label>IPアドレス<input id="f_host" placeholder="192.168.1.50"></label>
-    <label>RTSPポート<input id="f_port" type="number" value="554"></label>
-    <label>ストリーム<select id="f_stream"><option value="stream1">stream1（高画質 推奨）</option><option value="stream2">stream2（低画質）</option></select></label>
-    <label>カメラアカウント ユーザー名<input id="f_username" autocomplete="off"></label>
-    <label>カメラアカウント パスワード<input id="f_password" type="password" autocomplete="new-password" placeholder="変更しない場合は空欄"></label>
+    <label class="camonly">IPアドレス<input id="f_host" placeholder="192.168.1.50"></label>
+    <label class="camonly">RTSPポート<input id="f_port" type="number" value="554"></label>
+    <label class="camonly">ストリーム<select id="f_stream"><option value="stream1">stream1（高画質 推奨）</option><option value="stream2">stream2（低画質）</option></select></label>
+    <label class="camonly">カメラアカウント ユーザー名<input id="f_username" autocomplete="off"></label>
+    <label class="camonly">カメラアカウント パスワード<input id="f_password" type="password" autocomplete="new-password" placeholder="変更しない場合は空欄"></label>
   </div>
-  <details style="margin-top:12px"><summary class="small muted">詳細設定</summary>
+  <details class="camonly" style="margin-top:12px"><summary class="small muted">詳細設定</summary>
     <div class="form-grid" style="margin-top:8px">
       <label style="grid-column:1/-1">URL直接指定（任意。RTSP URL または画像ファイル/フォルダのパス。指定時はIP等より優先）<input id="f_url"></label>
     </div>
   </details>
-  <p class="small muted">Tapo アプリ → カメラ設定 → 高度な設定 → カメラのアカウント で作成したユーザー名/パスワードを入力します（TP-Link ID ではありません）。パスワードは Windows 資格情報マネージャーに保存されます。</p>
+  <p class="small muted camonly">Tapo アプリ → カメラ設定 → 高度な設定 → カメラのアカウント で作成したユーザー名/パスワードを入力します（TP-Link ID ではありません）。パスワードは Windows 資格情報マネージャーに保存されます。</p>
   <div class="row">
     <label class="inline"><input type="checkbox" id="f_enabled" checked> 記録を有効にする</label>
     <span class="spacer"></span>
-    <button id="test">接続テスト</button>
+    <button id="test" class="camonly">接続テスト</button>
     <button id="cancel">キャンセル</button>
     <button class="primary" id="save">保存</button>
   </div>
-  <div id="testresult" style="margin-top:12px"></div>
+  <div id="testresult" class="camonly" style="margin-top:12px"></div>
+</div>
+
+<div class="card" id="mtcard" style="margin-top:12px">
+  <h2>Matter</h2>
+  <div class="row" style="margin-bottom:8px">
+    <span>連携の状態:</span><span class="badge" id="mt_badge">確認中…</span>
+    <span id="mt_text" class="small muted"></span>
+  </div>
+  <div id="mt_nodes" class="small muted" style="margin-bottom:8px"></div>
+  <div class="small muted">
+    <p style="margin:0 0 4px">ペアリングの手順（初回のみ）</p>
+    <ol style="margin:0 0 12px;padding-left:20px">
+      <li>機器をスマホの Matter 対応アプリ（iPhone の「ホーム」、Google Home など）に追加しておく。</li>
+      <li>そのアプリで機器の「ペアリングモードをオン」（Google Home は「リンクされた Matter アプリとサービス」）にして、ペアリングコード（11桁）を表示する。</li>
+      <li>この常駐アプリをトレイの「終了」で止めてから、PowerShell でリポジトリのフォルダに移動し <code>node matter\rtmatter.mjs pair &lt;ペアリングコード&gt;</code> を実行する（コードは他人に見せないでください）。</li>
+      <li>常駐アプリを起動し直し、「温湿度センサーを探す」から追加する。</li>
+    </ol>
+  </div>
+  <div class="row">
+    <button class="primary" id="mt_find">温湿度センサーを探す</button>
+  </div>
+  <div id="mt_devices" style="margin-top:12px"></div>
 </div>
 {% endblock %}
 {% block scripts %}
 <script>
 let editing = null;
+const isCamera = c => !c || !c.kind || c.kind === "camera";
 const F = ["name", "host", "port", "stream", "username", "password", "url"];
 async function load() {
   const cams = await api("GET", "/api/cameras");
   document.getElementById("list").innerHTML = cams.map(c => `<div class="card">
     <div class="row"><strong>${esc(c.name)}</strong><span class="spacer"></span>
       ${c.enabled ? "" : '<span class="badge">無効</span>'}
-      ${c.calibrated ? '<span class="badge ok">校正済</span>' : '<span class="badge uncalibrated">未校正</span>'}</div>
-    <div class="small muted" style="margin:8px 0">${esc(c.url || `${c.host}:${c.port}/${c.stream}`)}${c.has_password ? "" : " ・パスワード未設定"}</div>
+      ${!isCamera(c) ? '<span class="badge">Matter</span>'
+        : c.calibrated ? '<span class="badge ok">校正済</span>' : '<span class="badge uncalibrated">未校正</span>'}</div>
+    <div class="small muted" style="margin:8px 0">${!isCamera(c) ? "機器ID: " + esc(c.device_id)
+        : esc(c.url || `${c.host}:${c.port}/${c.stream}`) + (c.has_password ? "" : " ・パスワード未設定")}</div>
     <div class="row">
-      <a class="btn primary" href="/calibrate/${c.id}">校正</a>
+      ${!isCamera(c) ? "" : `<a class="btn primary" href="/calibrate/${c.id}">校正</a>`}
       <button data-edit="${c.id}">編集</button>
       <button class="danger" data-del="${c.id}">削除</button>
     </div></div>`).join("") || `<div class="card muted">カメラが登録されていません。</div>`;
@@ -57,6 +82,7 @@ async function load() {
 }
 function openForm(c) {
   editing = c || null;
+  document.querySelectorAll(".camonly").forEach(e => e.style.display = (c && !isCamera(c)) ? "none" : "");
   document.getElementById("formtitle").textContent = c ? `「${c.name}」を編集` : "カメラを追加";
   F.forEach(k => document.getElementById("f_" + k).value = c ? (c[k] ?? "") : (k === "port" ? 554 : k === "stream" ? "stream1" : ""));
   document.getElementById("f_password").value = "";
@@ -66,6 +92,7 @@ function openForm(c) {
   document.getElementById("formcard").scrollIntoView({ behavior: "smooth" });
 }
 function formData() {
+  if (editing && !isCamera(editing)) return { name: document.getElementById("f_name").value, enabled: document.getElementById("f_enabled").checked };
   const d = {}; F.forEach(k => d[k] = document.getElementById("f_" + k).value);
   d.enabled = document.getElementById("f_enabled").checked;
   if (editing) d.id = editing.id;
@@ -90,9 +117,47 @@ document.getElementById("save").onclick = async () => {
     toast("保存しました");
     document.getElementById("formcard").style.display = "none";
     await load();
-    if (!editing && confirm("続けて校正を行いますか？")) location.href = `/calibrate/${c.id}`;
+    if (!editing && isCamera(c) && confirm("続けて校正を行いますか？")) location.href = `/calibrate/${c.id}`;
   } catch (err) { toast("エラー: " + err.message); }
 };
+
+async function mtStatus() {
+  const badge = document.getElementById("mt_badge"), text = document.getElementById("mt_text"), nodes = document.getElementById("mt_nodes");
+  try {
+    const r = await api("GET", "/api/matter");
+    const list = r.nodes || [];
+    badge.textContent = r.running ? "動作中" : "停止中";
+    badge.className = "badge" + (r.running ? " ok" : "");
+    text.textContent = r.running ? `（ペアリング済み ${list.length} 台）` : `停止中: ${r.error || "不明な理由"}`;
+    nodes.innerHTML = list.map(n => `<div>${esc(n.product || n.vendor || "不明な機器")}（${n.connected ? "接続中" : "未接続"}）</div>`).join("");
+  } catch (err) {
+    badge.textContent = "取得失敗"; badge.className = "badge"; text.textContent = ""; nodes.innerHTML = "";
+  }
+}
+document.getElementById("mt_find").onclick = async e => {
+  const out = document.getElementById("mt_devices");
+  e.target.disabled = true; out.innerHTML = '<span class="muted">検索中…</span>';
+  try {
+    const r = await api("GET", "/api/matter/devices");
+    const devs = r.devices || [];
+    out.innerHTML = devs.length ? `<table><thead><tr><th>名前</th><th>機器ID</th><th>温度</th><th>湿度</th><th>接続</th><th></th></tr></thead><tbody>${devs.map((d, i) => `<tr>
+      <td>${esc(d.name)}</td><td>${esc(d.id)}</td><td>${fmtNum(d.temperature, 1)} ℃</td><td>${fmtNum(d.humidity, 0)} %</td>
+      <td>${d.connected ? "接続中" : "未接続"}</td>
+      <td>${d.registered ? '<span class="muted">登録済み</span>' : `<button data-mtadd="${i}">追加</button>`}</td></tr>`).join("")}</tbody></table>`
+      : '<span class="muted">温湿度センサーが見つかりませんでした。</span>';
+    out.querySelectorAll("[data-mtadd]").forEach(b => b.onclick = async () => {
+      const d = devs[b.dataset.mtadd];
+      const name = prompt("この機器の名前", d.name);
+      if (name === null || !name.trim()) return;
+      try {
+        await api("POST", "/api/cameras", { name: name.trim(), kind: "matter", device_id: d.id });
+        toast("登録しました"); await load(); document.getElementById("mt_find").click();
+      } catch (err) { toast("エラー: " + err.message); }
+    });
+  } catch (err) { out.innerHTML = `<div class="alert bad">${esc(err.message)}</div>`; }
+  e.target.disabled = false;
+};
 load();
+mtStatus();
 </script>
 {% endblock %}

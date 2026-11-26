@@ -82,6 +82,9 @@ def main(argv=None) -> int:
 
     db = Database(cfg.db_path)
     recorder = Recorder(cfg, db)
+    from .matter import MatterBridge
+    recorder.matter = MatterBridge(cfg)
+    recorder.matter.start()
     scheduler = Scheduler(recorder, cfg["interval_sec"])
     scheduler.start()
     from .amedas import AmedasSyncer
@@ -109,6 +112,7 @@ def main(argv=None) -> int:
         scheduler.stop()
         amedas_syncer.stop()
         overlay.stop()
+        recorder.matter.stop()
         server.should_exit = True
 
     try:

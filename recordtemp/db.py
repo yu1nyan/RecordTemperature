@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS cameras (
     username TEXT NOT NULL DEFAULT '',
     stream TEXT NOT NULL DEFAULT 'stream1',
     url TEXT NOT NULL DEFAULT '',          -- optional override (any RTSP URL or image file path)
+    kind TEXT NOT NULL DEFAULT 'camera',   -- camera | matter
+    device_id TEXT NOT NULL DEFAULT '',    -- Matter device id "node/tempEndpoint/humEndpoint" (kind = matter)
     enabled INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL
 );
@@ -75,6 +77,10 @@ class Database:
             self._conn.commit()
 
     def _migrate(self):
+        cam_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(cameras)")}
+        for name, ddl in (("kind", "TEXT NOT NULL DEFAULT 'camera'"), ("device_id", "TEXT NOT NULL DEFAULT ''")):
+            if name not in cam_cols:
+                self._conn.execute(f"ALTER TABLE cameras ADD COLUMN {name} {ddl}")
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(readings)")}
         for name, typ in (("orig_temperature", "REAL"), ("orig_humidity", "REAL"),
                           ("orig_status", "TEXT"), ("edited_at", "INTEGER")):
@@ -96,7 +102,7 @@ class Database:
             return cur.lastrowid
 
     # ------------------------------------------------------------- cameras
-    CAMERA_FIELDS = ("name", "host", "port", "username", "stream", "url", "enabled")
+    CAMERA_FIELDS = ("name", "host", "port", "username", "stream", "url", "enabled", "kind", "device_id")
 
     def list_cameras(self, enabled_only=False) -> list[dict]:
         sql = "SELECT * FROM cameras" + (" WHERE enabled=1" if enabled_only else "") + " ORDER BY id"

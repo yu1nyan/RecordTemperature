@@ -32,6 +32,7 @@ DEFAULTS = {
     "overlay_alpha": 0.9,
     "overlay_x": -1,              # -1 = bottom-right of the primary screen
     "overlay_y": -1,
+    "matter_port": 8767,          # local HTTP port of the Matter bridge (matter/bridge.mjs)
 }
 
 

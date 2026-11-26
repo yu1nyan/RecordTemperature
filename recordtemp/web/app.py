@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .. import amedas, camera
+from ..matter import MatterError
 from ..config import DEFAULTS
 from ..scheduler import Recorder
 from ..sevenseg import pipeline as P
@@ -74,7 +75,8 @@ def create_app(recorder: Recorder, scheduler=None, amedas_syncer=None) -> FastAP
     def cam_out(c: dict) -> dict:
         out = dict(c)
         out["has_password"] = bool(c.get("url")) or bool(camera.get_password(c["id"]))
-        out["calibrated"] = db.active_calibration(c["id"]) is not None
+        # Matter sensors report values directly, so they never need calibration
+        out["calibrated"] = c.get("kind") == "matter" or db.active_calibration(c["id"]) is not None
         return out
 
     @app.get("/api/cameras")
@@ -82,12 +84,15 @@ def create_app(recorder: Recorder, scheduler=None, amedas_syncer=None) -> FastAP
         return [cam_out(c) for c in db.list_cameras()]
 
     def _cam_fields(body: dict) -> dict:
-        f = {k: body[k] for k in ("name", "host", "port", "username", "stream", "url", "enabled") if k in body}
+        f = {k: body[k] for k in ("name", "host", "port", "username", "stream", "url", "enabled", "kind", "device_id")
+             if k in body}
+        if "kind" in f and f["kind"] not in ("camera", "matter"):
+            raise HTTPException(400, "kind は camera か matter です")
         if "port" in f:
             f["port"] = int(f["port"] or 554)
         if "enabled" in f:
             f["enabled"] = 1 if f["enabled"] else 0
-        for k in ("name", "host", "username", "stream", "url"):
+        for k in ("name", "host", "username", "stream", "url", "device_id"):
             if k in f:
                 f[k] = (f[k] or "").strip()
         return f
@@ -97,7 +102,10 @@ def create_app(recorder: Recorder, scheduler=None, amedas_syncer=None) -> FastAP
         f = _cam_fields(body)
         if not f.get("name"):
             raise HTTPException(400, "名前は必須です")
-        if not f.get("host") and not f.get("url"):
+        if f.get("kind") == "matter":
+            if not f.get("device_id"):
+                raise HTTPException(400, "Matter の機器 ID がありません")
+        elif not f.get("host") and not f.get("url"):
             raise HTTPException(400, "IPアドレスまたはURLを入力してください")
         cid = db.add_camera(**f)
         if body.get("password"):
@@ -144,6 +152,28 @@ def create_app(recorder: Recorder, scheduler=None, amedas_syncer=None) -> FastAP
         finally:
             if tmp_id is not None:
                 camera.delete_password(tmp_id)
+
+    # --------------------------------------------------------------- matter
+    def _bridge():
+        if recorder.matter is None:
+            raise MatterError("Matter 連携が起動していません")
+        return recorder.matter
+
+    @app.get("/api/matter")
+    def matter_status():
+        try:
+            return _bridge().status()
+        except MatterError as e:
+            return {"running": False, "error": str(e), "nodes": []}
+
+    @app.get("/api/matter/devices")
+    def matter_devices():
+        try:
+            devices = _bridge().devices()
+        except MatterError as e:
+            raise HTTPException(400, str(e))
+        registered = {c["device_id"] for c in db.list_cameras() if c.get("kind") == "matter"}
+        return {"devices": [dict(d, registered=d.get("id") in registered) for d in devices]}
 
     # --------------------------------------------------------------- status
     @app.get("/api/status")

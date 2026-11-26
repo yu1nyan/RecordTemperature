@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import camera
+from .matter import MatterError
 from .config import Config
 from .db import Database
 from .sevenseg import pipeline as P
@@ -34,6 +35,7 @@ class Recorder:
         self.cfg = cfg
         self.db = db
         self.state: dict[int, CameraState] = {}
+        self.matter = None              # MatterBridge, set by __main__ (reads Matter sensors)
         self._ref_cache: dict[int, tuple[int, object]] = {}
         self._cam_locks: dict[int, threading.Lock] = {}
         self._lock = threading.Lock()
@@ -91,6 +93,8 @@ class Recorder:
     def _capture_camera(self, cam: dict, ts: int) -> dict:
         st = self.state.setdefault(cam["id"], CameraState())
         st.last_attempt = ts
+        if cam.get("kind") == "matter":
+            return self._capture_matter(cam, ts, st)
         try:
             frame = self.grab(cam)
         except Exception as e:  # noqa: BLE001
@@ -137,6 +141,31 @@ class Recorder:
         return {"status": status, "id": rid,
                 "temperature": res.temperature if res else None,
                 "humidity": res.humidity if res else None, "messages": msgs}
+
+    def _capture_matter(self, cam: dict, ts: int, st: CameraState) -> dict:
+        """Readings from a Matter sensor (via the bridge): no image, no calibration; only the range check."""
+        try:
+            if self.matter is None:
+                raise MatterError("Matter 連携が起動していません")
+            t, h = self.matter.read(cam["device_id"], now=ts)
+        except MatterError as e:
+            st.last_status, st.last_error, st.messages = "capture_error", str(e), [str(e)]
+            self.db.add_reading(cam["id"], ts, "capture_error", message=str(e))
+            log.warning("matter %s: %s", cam["id"], e)
+            return {"status": "capture_error", "message": str(e)}
+        st.last_error = ""
+        (tlo, thi), (hlo, hhi) = self.cfg["temp_range"], self.cfg["hum_range"]
+        msgs = []
+        if t is not None and not tlo <= t <= thi:
+            msgs.append(f"温度が範囲外 ({t})")
+        if h is not None and not hlo <= h <= hhi:
+            msgs.append(f"湿度が範囲外 ({h})")
+        status = "invalid" if msgs else "ok"
+        rid = self.db.add_reading(cam["id"], ts, status, t, h, 1.0, raw_text=f"Matter {t} / {h}",
+                                  message="; ".join(msgs) or None)
+        st.last_status, st.messages = status, msgs
+        log.info("matter %s: %s T=%s H=%s", cam["id"], status, t, h)
+        return {"status": status, "id": rid, "temperature": t, "humidity": h, "messages": msgs}
 
     def capture_all(self, ts: int | None = None) -> None:
         cams = self.db.list_cameras(enabled_only=True)
